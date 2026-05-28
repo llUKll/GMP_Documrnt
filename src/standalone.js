@@ -5,10 +5,15 @@ const STORAGE_PROJECT_PREFIX = "document-insight-project-v2:";
 const DEFAULT_MODEL = "gemini-2.5-flash-lite";
 const MAX_FILES = 10;
 const MAX_REFERENCE_FILES = 1;
-const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"];
-const MAX_EXTRACT_CHARS_PER_FILE = 18000;
-const MAX_GEMINI_INPUT_CHARS = 90000;
+const MAX_EXTRACT_CHARS_PER_FILE = 45000;
+const MAX_GEMINI_INPUT_CHARS = 120000;
+const ZIP_MAX_LIST_ITEMS = 160;
+const ZIP_MAX_TEXT_ENTRIES = 70;
+const ZIP_MAX_DOCUMENT_ENTRIES = 10;
+const ZIP_ENTRY_TEXT_LIMIT = 7000;
+const ZIP_TOTAL_TEXT_LIMIT = 42000;
 const DEFAULT_DOCUMENT_MODE = "regulatory";
 const REGULATORY_SKILL_VERSION = "regulatory-doc-generator-v1";
 const SHARE_STATE_VERSION = 1;
@@ -22,7 +27,7 @@ let state = {
     max_files_per_project: MAX_FILES,
     max_reference_files_per_project: MAX_REFERENCE_FILES,
     max_file_size_bytes: MAX_FILE_SIZE,
-    max_file_size_label: "20MB",
+    max_file_size_label: "50MB",
   },
   busy: false,
   busyMessage: "",
@@ -114,19 +119,19 @@ function render() {
 
         <section class="panel reference-panel">
           <label for="reference-files" class="label">참조파일</label>
-          <p class="helper-text">결과물의 목차, 문체, 표 구성, 검토 메모 형식을 맞출 기준 문서입니다. 새 파일을 선택하면 기존 참조파일을 대체합니다.</p>
+          <p class="helper-text">결과물의 목차, 문체, 표 구성, 검토 메모 형식을 맞출 기준 문서입니다. ZIP도 첨부할 수 있으며, ZIP 내부의 HWP/HWPX/DOCX/PDF/TXT 문서를 참조 형식 후보로 읽습니다. 새 파일을 선택하면 기존 참조파일을 대체합니다.</p>
           <div class="limit-grid compact-limit-grid">
             <span>참조파일: ${state.project?.reference_files?.length || 0}/${state.limits.max_reference_files_per_project}개</span>
             <span>지원 형식: ${escapeHtml(state.limits.supported_extensions.join(", "))}</span>
             <span>파일당 용량: ${escapeHtml(state.limits.max_file_size_label)}</span>
           </div>
           <input id="reference-files" type="file" accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
-          <small>예: 기존 인허가 문서, 기존 보고서, 양식 샘플, 검토 완료본. 참조파일의 사실관계는 그대로 복사하지 않고 형식 기준으로 사용합니다.</small>
+          <small>예: 기존 인허가 문서 HWP/HWPX/DOCX/PDF 또는 해당 문서들을 묶은 ZIP. 참조파일의 사실관계는 그대로 복사하지 않고 형식 기준으로 사용합니다.</small>
         </section>
 
         <section class="panel">
           <label for="files" class="label">첨부파일</label>
-          <p class="helper-text">GitHub Pages 정적 모드입니다. 파일은 서버로 업로드되지 않고 현재 브라우저에서만 읽습니다. 첨부파일은 최대 10개까지 분석하며 Android 프로젝트는 ZIP으로 첨부할 수 있습니다.</p>
+          <p class="helper-text">GitHub Pages 정적 모드입니다. 파일은 서버로 업로드되지 않고 현재 브라우저에서만 읽습니다. 첨부파일은 최대 10개까지 분석하며 Android 프로젝트, 화면 캡처, 보고서, 로그 묶음은 ZIP으로 첨부할 수 있습니다.</p>
           <div class="limit-grid">
             <span>지원 형식: ${escapeHtml(state.limits.supported_extensions.join(", "))}</span>
             <span>최대 개수: ${state.project?.files?.length || 0}/${state.limits.max_files_per_project}개</span>
@@ -137,7 +142,6 @@ function render() {
           <label for="file-path" class="label">파일명 또는 로컬 파일 경로</label>
           <input id="file-path" placeholder="브라우저 보안상 경로 직접 업로드는 지원하지 않습니다." disabled />
           <button id="upload-path" type="button" ${state.busy ? "disabled" : ""}>경로 업로드 안내</button>
-          <button id="generate-architecture" class="secondary" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>문서 아키텍처 생성</button>
           <button id="analyze" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>분석 및 초안 생성</button>
           <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>Word 다운로드</button>
         </section>
@@ -425,7 +429,6 @@ function bindEvents() {
     dropZone.classList.remove("dragging");
     uploadFileList(Array.from(event.dataTransfer.files || []));
   });
-  document.getElementById("generate-architecture")?.addEventListener("click", generateDocumentArchitecture);
   document.getElementById("analyze")?.addEventListener("click", analyzeProject);
   document.getElementById("download")?.addEventListener("click", downloadDocx);
   document.getElementById("save-draft")?.addEventListener("click", saveDraft);
@@ -963,7 +966,7 @@ async function parseSelectedFile(file) {
       base.summary = "HWP 바이너리 파일입니다. GitHub Pages 정적 모드에서는 본문 직접 추출이 제한되어 파일명/메타데이터 근거로 분석에 포함합니다. 정확한 본문 반영이 필요하면 HWPX, DOCX, PDF로 변환해 함께 첨부하세요.";
     }
     base.text = normalizeText(base.text).slice(0, MAX_EXTRACT_CHARS_PER_FILE);
-    base.summary = createLocalFileSummary(base.text, file.name);
+    base.summary = base.summary || createLocalFileSummary(base.text, file.name);
     if (!base.text.trim()) {
       base.parsed_status = "failed";
       base.error = "텍스트를 추출하지 못했습니다.";
@@ -1031,30 +1034,141 @@ async function parsePdf(file) {
 async function parseZip(file) {
   ensureLibrary(window.JSZip, "JSZip");
   const zip = await window.JSZip.loadAsync(await file.arrayBuffer());
-  const names = Object.keys(zip.files).filter(name => !zip.files[name].dir);
-  const important = names.filter(isImportantZipEntry).slice(0, 120);
+  const names = Object.keys(zip.files)
+    .filter(name => !zip.files[name].dir)
+    .filter(name => !isIgnorableZipEntry(name));
+  const documentEntries = names.filter(isZipExtractableDocument).sort(zipEntrySort);
+  const codeEntries = names.filter(name => isImportantZipEntry(name) && !isZipExtractableDocument(name)).sort(zipEntrySort);
+  const mediaEntries = names.filter(isZipMediaEntry).sort(zipEntrySort);
+  const nestedZipEntries = names.filter(name => extensionOf(name) === ".zip").sort(zipEntrySort);
+  const important = uniqueList([...documentEntries, ...codeEntries]).slice(0, ZIP_MAX_LIST_ITEMS);
   const parts = [
     `[ZIP: ${file.name}]`,
+    "ZIP 분석 요약: 내부 문서, 코드/설정, 화면/미디어 파일명을 분류하고, 브라우저에서 텍스트 추출 가능한 내부 파일은 본문 근거로 확장했습니다.",
     `총 파일 수: ${names.length}`,
-    `주요 파일 수: ${important.length}`,
+    `내부 문서 후보: ${documentEntries.length}`,
+    `코드/설정 후보: ${codeEntries.length}`,
+    `이미지/영상 후보: ${mediaEntries.length}`,
+    `중첩 ZIP 후보: ${nestedZipEntries.length}`,
     "",
-    "[주요 경로 목록]",
-    ...important.slice(0, 80).map(name => `- ${name}`),
+    "[ZIP 내부 문서/참조 후보]",
+    ...(documentEntries.slice(0, 50).map(name => `- ${name}`) || []),
+    "",
+    "[ZIP 내부 코드/설정 후보]",
+    ...(codeEntries.slice(0, 70).map(name => `- ${name}`) || []),
   ];
-  for (const name of important.slice(0, 45)) {
+
+  if (mediaEntries.length) {
+    parts.push("", "[ZIP 내부 화면/미디어 후보]", ...mediaEntries.slice(0, 60).map(name => `- ${name}`));
+  }
+  if (nestedZipEntries.length) {
+    parts.push("", "[중첩 ZIP 후보]", ...nestedZipEntries.slice(0, 20).map(name => `- ${name}`));
+  }
+
+  let extractedTextEntries = 0;
+  let extractedDocumentEntries = 0;
+  let totalExtractedChars = 0;
+  for (const name of important) {
+    if (extractedTextEntries >= ZIP_MAX_TEXT_ENTRIES) break;
+    if (totalExtractedChars >= ZIP_TOTAL_TEXT_LIMIT) break;
+    const entry = zip.file(name);
+    if (!entry) continue;
+    const ext = extensionOf(name);
+    const entrySize = getZipEntrySize(entry);
+    let cleaned = "";
     try {
-      const entry = zip.file(name);
-      if (!entry) continue;
-      const ext = extensionOf(name);
-      if (!isPlainTextExtension(ext) && !isAndroidEvidencePath(name)) continue;
-      const content = await entry.async("string");
-      const cleaned = normalizeText(content).slice(0, 7000);
-      if (cleaned) parts.push(`\n[FILE: ${name}]\n${cleaned}`);
+      if (isPlainTextExtension(ext)) {
+        cleaned = normalizeText(await entry.async("string"));
+      } else if (ext === ".hwp") {
+        cleaned = createHwpBrowserFallbackText({ name, size: entrySize || 0 });
+      } else if ([".docx", ".xlsx", ".pdf", ".hwpx", ".zip"].includes(ext)) {
+        if (extractedDocumentEntries >= ZIP_MAX_DOCUMENT_ENTRIES) continue;
+        if (entrySize && entrySize > 8 * 1024 * 1024 && ext !== ".zip") {
+          cleaned = `대용량 내부 문서라 브라우저 직접 추출을 건너뜁니다. 파일명: ${name}, 크기: ${formatBytes(entrySize)}`;
+        } else {
+          const blob = await zipEntryToBlob(entry, ext);
+          if (ext === ".docx") cleaned = await parseDocx(blob);
+          else if (ext === ".xlsx") cleaned = await parseXlsx(blob);
+          else if (ext === ".pdf") cleaned = await parsePdf(blob);
+          else if (ext === ".hwpx") cleaned = await parseHwpx(blob);
+          else if (ext === ".zip") cleaned = await summarizeNestedZipBlob(blob, name);
+        }
+        extractedDocumentEntries += 1;
+      }
+      cleaned = normalizeText(cleaned).slice(0, ZIP_ENTRY_TEXT_LIMIT);
+      if (!cleaned) continue;
+      totalExtractedChars += cleaned.length;
+      extractedTextEntries += 1;
+      parts.push(`\n[ZIP FILE: ${name}]\n${cleaned}`);
     } catch (error) {
-      parts.push(`\n[FILE: ${name}]\n읽기 실패: ${error.message}`);
+      parts.push(`\n[ZIP FILE: ${name}]\n읽기 실패: ${error.message}`);
     }
   }
   return parts.join("\n");
+}
+
+function uniqueList(items) {
+  return [...new Set(items.filter(Boolean))];
+}
+
+function zipEntrySort(a, b) {
+  return zipEntryPriority(a) - zipEntryPriority(b) || String(a).localeCompare(String(b));
+}
+
+function zipEntryPriority(name) {
+  const lower = String(name || "").toLowerCase();
+  if (/ib-sdf|sdf|상세설계|software.*design|설계|인허가|regulatory|submission/.test(lower)) return 0;
+  if (/readme|manual|guide|사용자|매뉴얼|보고서|report|log|test|검증|시험/.test(lower)) return 1;
+  if (/androidmanifest\.xml$|build\.gradle|settings\.gradle/.test(lower)) return 2;
+  if (/res\/values\/.*\.xml$|strings\.xml$|res\/layout\/.*\.xml$|res\/menu\/.*\.xml$|navigation\/.*\.xml$/.test(lower)) return 3;
+  if (/activity|service|fragment|viewmodel|repository|dao|database|export|log|safety|alarm|emergency|bluetooth|ble|socket|api/.test(lower)) return 4;
+  if (isZipMediaEntry(name)) return 8;
+  return 9;
+}
+
+function isIgnorableZipEntry(name) {
+  const normalized = String(name || "").replaceAll("\\", "/");
+  return /(^|\/)\.git\/|(^|\/)node_modules\/|(^|\/)build\/|(^|\/)\.gradle\/|(^|\/)\.idea\/|(^|\/)__macosx\/|\.DS_Store$/i.test(normalized);
+}
+
+function isZipExtractableDocument(name) {
+  const ext = extensionOf(name);
+  return [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".hwpx", ".hwp", ".xml", ".json", ".yml", ".yaml", ".zip"].includes(ext);
+}
+
+function isZipMediaEntry(name) {
+  return /\.(png|jpe?g|webp|gif|bmp|svg|mp4|mov|webm|avi|mkv)$/i.test(String(name || ""));
+}
+
+function getZipEntrySize(entry) {
+  return Number(entry?._data?.uncompressedSize || entry?._data?.compressedSize || 0);
+}
+
+async function zipEntryToBlob(entry, extension) {
+  const buffer = await entry.async("arraybuffer");
+  return new Blob([buffer], { type: mimeTypeForExtension(extension) });
+}
+
+function mimeTypeForExtension(extension) {
+  return {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".pdf": "application/pdf",
+    ".hwpx": "application/hwp+zip",
+    ".zip": "application/zip",
+  }[extension] || "application/octet-stream";
+}
+
+async function summarizeNestedZipBlob(blob, nestedName) {
+  const zip = await window.JSZip.loadAsync(await blob.arrayBuffer());
+  const names = Object.keys(zip.files).filter(name => !zip.files[name].dir).filter(name => !isIgnorableZipEntry(name));
+  const important = names.filter(name => isZipExtractableDocument(name) || isImportantZipEntry(name)).sort(zipEntrySort).slice(0, 50);
+  return [
+    `[NESTED ZIP: ${nestedName}]`,
+    `총 파일 수: ${names.length}`,
+    "주요 내부 파일:",
+    ...important.map(name => `- ${name}`),
+  ].join("\n");
 }
 
 async function parseHwpx(file) {
@@ -1078,7 +1192,7 @@ function isPlainTextExtension(extension) {
 function isImportantZipEntry(name) {
   const normalized = String(name || "").replaceAll("\\", "/");
   const lower = normalized.toLowerCase();
-  if (/node_modules|\.git/gi.test(normalized)) return false;
+  if (isIgnorableZipEntry(normalized)) return false;
   if (/androidmanifest\.xml$/.test(lower)) return true;
   if (/(build|settings)\.gradle(\.kts)?$/.test(lower)) return true;
   if (/res\/values\/.*\.xml$/.test(lower)) return true;
@@ -1086,6 +1200,7 @@ function isImportantZipEntry(name) {
   if (/res\/menu\/.*\.xml$/.test(lower)) return true;
   if (/navigation\/.*\.xml$/.test(lower)) return true;
   if (/\.(kt|java|xml|gradle|kts|md|txt|json|yml|yaml)$/.test(lower)) return true;
+  if (/\.(docx|pdf|xlsx|hwpx|hwp|zip)$/.test(lower)) return true;
   return false;
 }
 
@@ -1413,7 +1528,8 @@ function buildGenericReportPrompt(sourceText) {
 }
 
 function buildRegulatoryPrompt(sourceText, profile, inventory) {
-  return `당신은 한국어 의료기기/장비 소프트웨어 인허가 문서 초안 작성자입니다. 아래 참조파일과 첨부파일을 구분해서 읽고, 참조파일의 형식에 맞춰 현재 버전 인허가 문서 초안을 작성하세요.\n\n중요 원칙:\n- 규제/안전/성능/시험/사용목적 사실을 발명하지 마세요.\n- 확인되지 않은 내용은 반드시 '[확인 필요: ...]' 형식으로 표시하세요.\n- 참조파일이 제공된 경우 참조파일의 목차, 제목 스타일, 표 컬럼 구성, 문체, 검토 메모 배치를 결과물의 형식 기준으로 우선 반영하세요.\n- 기존 문서의 구조, 제목 스타일, 용어, 공식 문구는 가능한 한 보존하세요.\n- 참조파일에 있는 사실관계를 첨부파일 근거 없이 현재 버전 사실로 복사하지 마세요. 근거가 없으면 [확인 필요: ...]로 분리하세요.\n- Android 프로젝트 ZIP이 있으면 AndroidManifest.xml, Gradle, res/values/strings.xml, layout/menu/navigation, kt/java 소스의 화면/권한/서비스/통신/로그/안전 체크 근거를 우선 정리하세요.\n- 스크린샷/매뉴얼과 코드가 충돌하면 사용자에게 보이는 스크린샷/매뉴얼을 우선하고 차이를 검토 메모에 기록하세요.\n- 제출용 문안과 검토 메모를 분리하세요.\n- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.\n\n사용자 입력 제약:\n- 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}\n- SW 버전/빌드: ${profile.software_version || "[확인 필요: SW 버전/빌드]"}\n- 대상 장비/하드웨어: ${profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"}\n- 대상 규제/기관: ${profile.target_regulator || "[확인 필요: 대상 규제/기관]"}\n- 사용 목적: ${profile.intended_use || "[확인 필요: 사용 목적]"}\n\n첨부파일 분류 힌트:\n${inventory}\n\n작성 순서:\n1. Reference Structure: 기존 승인/참조 문서의 섹션, 반복 공식 문구, 유지해야 할 안전/목적 문구를 추출하세요.\n2. Current Evidence Map: 현재 Android/매뉴얼/테스트 근거를 화면, 기능, 권한, 통신, 로그, 안전 체크, 제한사항으로 정리하세요.\n3. Change Map: Same, Modified, New, Removed, Unknown으로 비교하세요.\n4. Submission-ready Draft: 현재 버전 인허가 문서 초안을 작성하세요.\n5. Review Notes: 확인 필요 항목, 부족한 근거, 사용한 근거 파일을 모으세요.\n\n반환 JSON 스키마:\n{"title":"<현재 프로그램명> 인허가 문서 초안","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}},{"id":"b4","type":"diagram","order":3,"content":{"title":"흐름도","code":"텍스트 다이어그램"}}]}\n\n필수 포함 블록:\n- Reference Structure\n- Current Evidence Map\n- Change Map 표(Area, Prior document, Current evidence, Action)\n- Submission-ready Draft\n- 검토 메모\n- 확인 필요 항목 표\n- 사용한 근거 파일 표\n\n첨부파일 추출 텍스트:\n${sourceText}`;
+  return `당신은 한국어 의료기기/장비 소프트웨어 인허가 문서 초안 작성자입니다. 아래 참조파일과 첨부파일을 구분해서 읽고, 참조파일의 형식에 맞춰 현재 버전 인허가 문서 초안을 작성하세요. 참조파일이 IB-SDF/SW 상세설계파일 계열이면 표지, 제·개정 이력, 개요, 용어정의, S/W 아키텍처 설계도, S/W 설계 기술서, S/W 설계 명세서 흐름을 우선 적용하세요.\n\n중요 원칙:\n- 규제/안전/성능/시험/사용목적 사실을 발명하지 마세요.\n- 확인되지 않은 내용은 반드시 '[확인 필요: ...]' 형식으로 표시하세요.\n- 참조파일이 제공된 경우 참조파일의 목차, 제목 스타일, 표 컬럼 구성, 문체, 검토 메모 배치를 결과물의 형식 기준으로 우선 반영하세요.\n- 기존 문서의 구조, 제목 스타일, 용어, 공식 문구는 가능한 한 보존하세요.\n- 참조파일에 있는 사실관계를 첨부파일 근거 없이 현재 버전 사실로 복사하지 마세요. 근거가 없으면 [확인 필요: ...]로 분리하세요.\n- ZIP 파일이 참조파일로 제공되면 ZIP 내부의 HWP/HWPX/DOCX/PDF/TXT를 형식 참조 후보로 보고, 목차·표·문체·제출 문서 구조를 우선 반영하세요. HWP 바이너리는 브라우저에서 본문 추출이 제한되므로 파일명/메타데이터 근거와 [확인 필요]를 함께 표시하세요.
+- ZIP 파일이 첨부파일로 제공되면 ZIP 내부의 AndroidManifest.xml, Gradle, res/values/strings.xml, layout/menu/navigation, kt/java 소스, PDF/보고서/로그, 이미지·영상 파일명을 현재 구현 근거로 정리하세요.\n- 스크린샷/매뉴얼과 코드가 충돌하면 사용자에게 보이는 스크린샷/매뉴얼을 우선하고 차이를 검토 메모에 기록하세요.\n- 제출용 문안과 검토 메모를 분리하세요.\n- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.\n\n사용자 입력 제약:\n- 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}\n- SW 버전/빌드: ${profile.software_version || "[확인 필요: SW 버전/빌드]"}\n- 대상 장비/하드웨어: ${profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"}\n- 대상 규제/기관: ${profile.target_regulator || "[확인 필요: 대상 규제/기관]"}\n- 사용 목적: ${profile.intended_use || "[확인 필요: 사용 목적]"}\n\n첨부파일 분류 힌트:\n${inventory}\n\n작성 순서:\n1. Reference Structure: 기존 승인/참조 문서의 섹션, 반복 공식 문구, 유지해야 할 안전/목적 문구를 추출하세요.\n2. Current Evidence Map: 현재 Android/매뉴얼/테스트 근거를 화면, 기능, 권한, 통신, 로그, 안전 체크, 제한사항으로 정리하세요.\n3. Change Map: Same, Modified, New, Removed, Unknown으로 비교하세요.\n4. Submission-ready Draft: 현재 버전 인허가 문서 초안을 작성하세요.\n5. Review Notes: 확인 필요 항목, 부족한 근거, 사용한 근거 파일을 모으세요.\n\n반환 JSON 스키마:\n{"title":"<현재 프로그램명> 인허가 문서 초안","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}},{"id":"b4","type":"diagram","order":3,"content":{"title":"흐름도","code":"텍스트 다이어그램"}}]}\n\n필수 포함 블록:\n- Reference Structure\n- Current Evidence Map\n- Change Map 표(Area, Prior document, Current evidence, Action)\n- Submission-ready Draft\n- 검토 메모\n- 확인 필요 항목 표\n- 사용한 근거 파일 표\n\n첨부파일 추출 텍스트:\n${sourceText}`;
 }
 
 function generateLocalDraft(files, fallbackReason = "", referenceFiles = []) {
@@ -1457,12 +1573,12 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
   ];
   const blocks = [
     headingBlock(0, 1, `${profile.product_name || state.project.title || "현재 프로그램"} 인허가 문서 초안`),
-    paragraphBlock(1, `${fallbackReason ? `Gemini 생성 실패 사유: ${fallbackReason}\n` : ""}본 초안은 첨부파일을 브라우저에서 읽어 생성한 인허가 문서 검토용 초안입니다. 참조파일이 있으면 해당 문서의 목차·문체·표 구성을 결과물 형식 기준으로 반영합니다. 규제/안전/성능/시험 결과는 제공된 근거 범위 내에서만 반영하며, 확인되지 않은 항목은 [확인 필요: ...]로 표시했습니다.`),
+    paragraphBlock(1, `${fallbackReason ? `Gemini 생성 실패 사유: ${fallbackReason}\n` : ""}본 초안은 참조파일과 첨부 ZIP/문서를 브라우저에서 읽어 생성한 SW 인허가 문서 검토용 초안입니다. 참조파일이 SW 상세설계파일/IB-SDF 양식이면 해당 목차·문체·표 구성을 우선 반영하고, 현재 구현 근거는 첨부파일에서 확인 가능한 범위만 사용합니다. 규제/안전/성능/시험 결과는 제공된 근거 범위 내에서만 반영하며, 확인되지 않은 항목은 [확인 필요: ...]로 표시했습니다.`),
     headingBlock(2, 2, "0. 참조파일 형식 반영 기준"),
     tableBlock(3, "참조파일 형식 기준", ["파일명", "형식", "크기", "반영할 형식 요소"], referenceRows.length ? referenceRows : [["참조파일 없음", "-", "-", "기본 인허가 문서 구조로 생성"]]),
-    headingBlock(4, 2, "1. Intake / 입력 자료 분류"),
-    tableBlock(5, "첨부 자료 분류", ["파일명", "분류", "형식", "크기", "요약"], inventoryRows),
-    headingBlock(6, 2, "2. 사용자 입력 제약"),
+    headingBlock(4, 2, "0. 제·개정 이력표"),
+    tableBlock(5, "제·개정 이력", ["개정번호", "제·개정일", "제·개정 이력 사항"], [["0", "[확인 필요: 제정일]", "첨부 참조 문서 및 현재 ZIP 근거를 기반으로 SW 상세설계파일 초안 작성"]]),
+    headingBlock(6, 2, "1. 개요 (Introduction)"),
     tableBlock(7, "현재 버전 기본 정보", ["항목", "내용"], [
       ["프로그램명", profile.product_name || "[확인 필요: 현재 프로그램명]"],
       ["SW 버전/빌드", profile.software_version || "[확인 필요: SW 버전/빌드]"],
@@ -1470,17 +1586,19 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
       ["대상 규제/기관", profile.target_regulator || "[확인 필요: 대상 규제/기관]"],
       ["사용 목적", profile.intended_use || "[확인 필요: 사용 목적]"],
     ]),
-    headingBlock(8, 2, "3. Reference Structure"),
-    paragraphBlock(9, "기존 승인/참조 문서가 첨부된 경우 섹션 순서, 반복 공식 문구, 안전 주의 문구, 정의, 시험 방법 문구를 유지 대상으로 검토해야 합니다. 기존 문서가 없거나 식별되지 않으면 [확인 필요: prior approved/reference document]로 남겨야 합니다."),
-    headingBlock(10, 2, "4. Current Evidence Map"),
-    tableBlock(11, "Android/현재 자료 근거 맵", ["구분", "추출 근거", "검토 포인트"], androidRows.length ? androidRows : [["현재 근거", "Android 프로젝트 ZIP 또는 매뉴얼/스크린샷 필요", "[확인 필요: 현재 화면/기능 근거]" ]]),
-    headingBlock(12, 2, "5. Change Map"),
-    tableBlock(13, "Old vs Current 변경 맵", ["Area", "Prior document", "Current evidence", "Action"], changeRows),
-    headingBlock(14, 2, "6. Submission-ready Draft"),
-    paragraphBlock(15, `제품명 ${profile.product_name || "[확인 필요: 프로그램명]"}의 현재 버전 소프트웨어는 ${profile.target_hardware || "[확인 필요: 대상 장비]"}와 함께 사용되는 소프트웨어로, ${profile.intended_use || "[확인 필요: 사용 목적]"}을 지원합니다. 본 문안은 첨부 자료 기준 초안이며, 최종 제출 전 기존 승인 문서의 공식 문구와 시험 결과표를 대조해야 합니다.`),
-    headingBlock(16, 2, "7. 검토 메모"),
-    tableBlock(17, "확인 필요 항목", ["항목", "필요 근거", "우선순위"], missingRows),
-    tableBlock(18, "사용한 근거 파일", ["파일명", "근거 유형", "비고"], inventoryRows.map(row => [row[0], row[1], row[4]])),
+    headingBlock(8, 2, "2. 용어정의 (Terminology and Definitions)"),
+    tableBlock(9, "용어정의", ["용어", "정의"], [["S/W 아키텍처 설계도", "소프트웨어 주요 기능 유닛, 하드웨어, 데이터 흐름 관계를 나타낸 구조도"], ["S/W 설계 기술서", "요구사항을 만족하기 위한 소프트웨어 구성요소와 내부 인터페이스 설명"], ["S/W 설계 명세서", "요구사항을 어떻게 구현하는지 설명하는 상세 설계 명세"]]),
+    headingBlock(10, 2, "3. S/W 아키텍처 설계도"),
+    { id: makeId("block"), type: "diagram", order: 11, content: { title: "문서/자료 분석 기반 SW 아키텍처", code: "참조 문서/양식 ZIP → 형식 기준 추출\n현재 구현 ZIP/보고서/로그 → 기능 근거 추출\nGemini/로컬 생성기 → SW 상세설계파일 초안\n편집기 검토 → Word 다운로드" } },
+    headingBlock(12, 2, "4. S/W 설계 기술서 (Software Design Description)"),
+    tableBlock(13, "Android/현재 자료 근거 맵", ["구분", "추출 근거", "검토 포인트"], androidRows.length ? androidRows : [["현재 근거", "Android 프로젝트 ZIP 또는 매뉴얼/스크린샷 필요", "[확인 필요: 현재 화면/기능 근거]" ]]),
+    headingBlock(14, 2, "5. S/W 설계 명세서 (Software Design Specification)"),
+    tableBlock(15, "Old vs Current 변경 맵", ["Area", "Prior document", "Current evidence", "Action"], changeRows),
+    paragraphBlock(16, `제품명 ${profile.product_name || "[확인 필요: 프로그램명]"}의 현재 버전 소프트웨어는 ${profile.target_hardware || "[확인 필요: 대상 장비]"}와 함께 사용되는 소프트웨어로, ${profile.intended_use || "[확인 필요: 사용 목적]"}을 지원합니다. 본 문안은 첨부 자료 기준 초안이며, 최종 제출 전 기존 승인 문서의 공식 문구와 시험 결과표를 대조해야 합니다.`),
+    headingBlock(17, 2, "6. 검토 메모"),
+    tableBlock(18, "확인 필요 항목", ["항목", "필요 근거", "우선순위"], missingRows),
+    tableBlock(19, "첨부 자료 분류", ["파일명", "분류", "형식", "크기", "요약"], inventoryRows),
+    tableBlock(20, "사용한 근거 파일", ["파일명", "근거 유형", "비고"], inventoryRows.map(row => [row[0], row[1], row[4]])),
   ];
   return { title: `${profile.product_name || state.project.title || "현재 프로그램"} 인허가 문서 초안`, blocks };
 }
@@ -1925,7 +2043,7 @@ function buildGeminiSourceText(referenceFiles = [], files = []) {
   if (referenceFiles.length) {
     sections.push([
       "## 참조파일 / FORMAT REFERENCE",
-      "아래 파일은 결과물의 목차, 문체, 표 구성, 검토 메모 형식을 맞추기 위한 기준입니다. 현재 버전 사실관계는 첨부파일 근거가 있을 때만 반영하세요.",
+      "아래 파일은 결과물의 목차, 문체, 표 구성, 검토 메모 형식을 맞추기 위한 기준입니다. ZIP은 내부 파일 목록과 추출 가능한 문서 본문이 확장되어 있습니다. 현재 버전 사실관계는 첨부파일 근거가 있을 때만 반영하세요.",
       ...referenceFiles.map(file => `### [REF] ${file.filename} (${file.extension}, ${formatBytes(file.size)})\n${file.text}`),
     ].join("\n\n"));
   }
@@ -1957,11 +2075,14 @@ function buildArtifactInventory(files, referenceFiles = []) {
 
 function classifyArtifact(file) {
   const name = String(file.filename || "").toLowerCase();
-  const text = String(file.text || "").slice(0, 6000).toLowerCase();
-  if (file.extension === ".zip" || /androidmanifest\.xml|build\.gradle|res\/values|class .*activity|fun oncreate|extends activity/.test(text)) return "Current Android project evidence";
-  if (/test|검증|시험|result|결과|validation|verification|로그/.test(name + " " + text)) return "Test notes/results";
-  if (/manual|매뉴얼|사용자|화면|스크린샷|guide|procedure|절차/.test(name + " " + text)) return "Current manual/screenshots";
-  if (/인허가|허가|승인|reference|prior|기존|previous|품목|의료기기|regulatory/.test(name + " " + text)) return "Reference regulatory document";
+  const text = String(file.text || "").slice(0, 9000).toLowerCase();
+  const combined = `${name}
+${text}`;
+  if (/ib-sdf|s\/w 상세설계|소프트웨어 상세설계|software design|인허가|허가|승인|reference|prior|기존|previous|품목|의료기기|regulatory|submission/.test(combined)) return "Reference regulatory document";
+  if (/test|검증|시험|result|결과|validation|verification|로그|report|보고서/.test(combined)) return "Test notes/results";
+  if (/manual|매뉴얼|사용자|화면|스크린샷|screenshot|guide|procedure|절차|\.(png|jpg|jpeg|webp|mp4|mov)/.test(combined)) return "Current manual/screenshots";
+  if (/androidmanifest\.xml|build\.gradle|settings\.gradle|res\/values|class .*activity|fun oncreate|extends activity|activity|service|bluetooth|ble|websocket|api/.test(combined)) return "Current Android project evidence";
+  if (file.extension === ".zip") return "ZIP supporting bundle";
   return "Unclassified supporting material";
 }
 

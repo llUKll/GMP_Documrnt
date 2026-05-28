@@ -13,10 +13,10 @@ function App() {
   const [toasts, setToasts] = useState([]);
   const [settings, setSettings] = useState({ has_gemini_api_key: false, gemini_model: "gemini-2.5-flash-lite" });
   const [limits, setLimits] = useState({
-    supported_extensions: [".docx", ".pdf", ".xlsx"],
+    supported_extensions: [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"],
     max_files_per_project: 10,
-    max_file_size_bytes: 20 * 1024 * 1024,
-    max_file_size_label: "20MB",
+    max_file_size_bytes: 50 * 1024 * 1024,
+    max_file_size_label: "50MB",
   });
   const [geminiKey, setGeminiKey] = useState("");
   const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash-lite");
@@ -303,13 +303,13 @@ function App() {
 
         <section className="panel">
           <label className="label" htmlFor="files">첨부파일</label>
-          <p className="helper-text">분석에 사용할 엑셀, Word, PDF 자료를 첨부하세요. 여러 파일을 넣으면 하나의 문서 초안으로 합칩니다.</p>
+          <p className="helper-text">분석에 사용할 엑셀, Word, PDF, HWPX/HWP, ZIP, Android 소스/설정 자료를 첨부하세요. ZIP 내부 파일도 근거 목록과 추출 텍스트로 반영합니다.</p>
           <div className="limit-grid">
             <span>지원 형식: {limits.supported_extensions.join(", ")}</span>
             <span>최대 개수: {project?.files?.length || 0}/{limits.max_files_per_project}개</span>
             <span>파일당 용량: {limits.max_file_size_label}</span>
           </div>
-          <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf" onChange={uploadFiles} disabled={busy} />
+          <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" onChange={uploadFiles} disabled={busy} />
           <button onClick={analyze} disabled={!project || project.files.length === 0 || busy}>분석 및 초안 생성</button>
           <button className="secondary" onClick={downloadDocx} disabled={!project?.draft || busy}>Word 다운로드</button>
         </section>

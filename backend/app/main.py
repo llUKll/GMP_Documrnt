@@ -246,7 +246,7 @@ def validate_upload_slot(project: Project) -> None:
 
 def validate_extension(suffix: str) -> None:
     if suffix not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="지원 형식은 XLSX, DOCX, PDF입니다.")
+        raise HTTPException(status_code=400, detail="지원 형식은 XLSX, DOCX, PDF, TXT, MD, CSV, ZIP, HWPX, HWP, Android 소스/설정 파일입니다.")
 
 
 def validate_size(path: Path) -> None:

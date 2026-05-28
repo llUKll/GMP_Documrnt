@@ -158,8 +158,7 @@ function render() {
             <option value="two_step" ${(state.settings.pipeline_mode || "high_quality") === "two_step" ? "selected" : ""}>2단계 분석</option>
             <option value="single_pass" ${(state.settings.pipeline_mode || "high_quality") === "single_pass" ? "selected" : ""}>단일 생성</option>
           </select>
-          <button id="save-settings" type="button" ${state.busy ? "disabled" : ""}>AI 설정 저장</button>
-          <small>${currentAiKey() ? `${currentAiProviderLabel()} / ${currentAiModel()} 사용 중입니다. 선택한 모델만 사용하며 자동 하위 모델 전환은 하지 않습니다. API Key는 이 브라우저 localStorage에만 저장됩니다.` : "선택한 제공자의 API Key가 없으면 생성이 중단됩니다. 로컬 대체 생성은 사용하지 않습니다."}</small>
+          <small>${currentAiKey() ? `${currentAiProviderLabel()} / ${currentAiModel()} 사용 중입니다. 설정 변경 시 자동 저장됩니다. 선택한 모델만 사용하며 자동 하위 모델 전환은 하지 않습니다. API Key는 이 브라우저 localStorage에만 저장됩니다.` : "선택한 제공자의 API Key가 없으면 생성이 중단됩니다. API Key 입력 후 다른 곳을 클릭하면 자동 저장됩니다."}</small>
           <small>주의: GitHub Pages 정적 모드에서는 API Key를 브라우저에 저장해 직접 호출합니다. 사내/상용 배포에서는 백엔드 프록시 사용을 권장합니다.</small>
         </section>
 
@@ -534,8 +533,7 @@ function analysisPipelineTemplate() {
 
 function bindEvents() {
   document.getElementById("create-project")?.addEventListener("click", createProject);
-  document.getElementById("save-settings")?.addEventListener("click", saveSettings);
-  ["doc-mode", "ai-provider", "openai-model", "gemini-model", "pipeline-mode", "product-name", "software-version", "target-hardware", "target-regulator", "intended-use"].forEach(id => {
+  ["doc-mode", "ai-provider", "openai-model", "gemini-model", "pipeline-mode", "product-name", "software-version", "target-hardware", "target-regulator", "intended-use", "openai-key", "gemini-key"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", saveSettings);
   });
   document.getElementById("reference-files")?.addEventListener("change", uploadReferenceFiles);
@@ -929,9 +927,9 @@ function saveSettings() {
   if (openaiKey) state.settings.openai_api_key = openaiKey;
   saveSettingsToStorage(state.settings);
   state.status = currentAiKey()
-    ? `설정이 저장되었습니다. ${currentAiProviderLabel()} ${currentAiModel()} 모델로 인허가 문서 생성 스킬이 적용됩니다.`
-    : "설정이 저장되었습니다. 선택한 제공자의 키가 없으면 생성이 중단됩니다.";
-  pushToast("success", "저장 완료", state.status);
+    ? `${currentAiProviderLabel()} ${currentAiModel()} 설정이 자동 저장되었습니다.`
+    : "AI 설정이 자동 저장되었습니다. 선택한 제공자의 키가 없으면 생성이 중단됩니다.";
+  pushToast("success", "설정 자동 저장", state.status);
   render();
 }
 
@@ -3320,7 +3318,8 @@ async function downloadPptx(draft = getDownloadDraft()) {
   await withStatus(`${getDownloadModeLabel()} PowerPoint 문서를 생성하는 중입니다.`, async () => {
     const PptxCtor = resolvePptxConstructor();
     ensureLibrary(PptxCtor, "PptxGenJS");
-    const pptx = buildPptxFromDraft(draft, PptxCtor);
+    ensureLibrary(window.html2canvas, "html2canvas");
+    const pptx = await buildPptxFromDraft(draft, PptxCtor);
     const fileName = `${downloadFileBaseName(draft)}.pptx`;
     await pptx.writeFile({ fileName });
     state.status = `${getDownloadModeLabel()} PowerPoint 다운로드를 시작했습니다.`;
@@ -3331,7 +3330,7 @@ function resolvePptxConstructor() {
   return window.pptxgen || window.pptxgenjs || window.PptxGenJS || window.PptxGen;
 }
 
-function buildPptxFromDraft(draft, PptxCtor) {
+async function buildPptxFromDraft(draft, PptxCtor) {
   const pptx = new PptxCtor();
   pptx.layout = "LAYOUT_WIDE";
   pptx.author = "Document Insight OS";
@@ -3341,34 +3340,69 @@ function buildPptxFromDraft(draft, PptxCtor) {
   pptx.lang = "ko-KR";
   pptx.theme = { headFontFace: "Arial", bodyFontFace: "Arial", lang: "ko-KR" };
   addPptTitleSlide(pptx, draft.title || "문서 초안");
-  const blocks = [...(draft.blocks || [])].sort((a, b) => a.order - b.order);
-  let sectionTitle = draft.title || "문서 초안";
-  for (const block of blocks) {
-    const content = block.content || {};
-    if (block.type === "heading") {
-      sectionTitle = content.text || sectionTitle;
-      addPptSectionSlide(pptx, sectionTitle);
-    } else if (block.type === "paragraph") {
-      for (const chunk of splitTextForSlides(content.text || "", 620)) addPptTextSlide(pptx, sectionTitle, chunk);
-    } else if (block.type === "table") {
-      addPptTableSlides(pptx, content.caption || sectionTitle, content.headers || [], content.rows || []);
-    } else if (block.type === "diagram") {
-      addPptTextSlide(pptx, content.title || sectionTitle, content.code || "");
-    } else if (block.type === "chart") {
-      const rows = (content.values || []).map(item => `${item.label}: ${item.value}`).join("\n");
-      addPptTextSlide(pptx, content.title || sectionTitle, rows);
-    } else if (block.type === "image") {
-      addPptImageSlide(pptx, content.caption || content.alt || sectionTitle, content);
+
+  const host = document.createElement("div");
+  host.className = "ppt-export-host";
+  host.style.cssText = "position:absolute;left:-12000px;top:0;width:960px;background:#fff;color:#172033;font-family:Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;line-height:1.5;z-index:-1;";
+  document.body.appendChild(host);
+  try {
+    const blocks = [...(draft.blocks || [])].sort((a, b) => a.order - b.order);
+    for (const block of blocks) {
+      const element = createPdfBlockElement(block, false);
+      if (!element) continue;
+      element.style.width = "960px";
+      await addRenderedElementToPptx(pptx, element, host);
     }
+    return pptx;
+  } finally {
+    host.remove();
   }
-  return pptx;
+}
+
+async function addRenderedElementToPptx(pptx, element, host) {
+  host.innerHTML = "";
+  host.appendChild(element);
+  await waitForImages(element);
+  const canvas = await window.html2canvas(element, { scale: 1.5, backgroundColor: "#ffffff", useCORS: true, allowTaint: true, logging: false });
+  if (!canvas.width || !canvas.height) return;
+  const slideW = 13.333;
+  const slideH = 7.5;
+  const marginX = 0.42;
+  const marginY = 0.32;
+  const maxW = slideW - marginX * 2;
+  const maxH = slideH - marginY * 2;
+  const fullH = canvas.height * maxW / canvas.width;
+
+  if (fullH <= maxH) {
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    slide.addImage({ data: canvas.toDataURL("image/png", 0.92), x: marginX, y: marginY, w: maxW, h: fullH });
+    return;
+  }
+
+  const sliceCanvas = document.createElement("canvas");
+  const sliceCtx = sliceCanvas.getContext("2d");
+  sliceCanvas.width = canvas.width;
+  const sliceHpx = Math.max(280, Math.floor(maxH * canvas.width / maxW));
+  let y = 0;
+  while (y < canvas.height) {
+    const h = Math.min(sliceHpx, canvas.height - y);
+    sliceCanvas.height = h;
+    sliceCtx.clearRect(0, 0, sliceCanvas.width, h);
+    sliceCtx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, sliceCanvas.width, h);
+    const targetH = h * maxW / canvas.width;
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    slide.addImage({ data: sliceCanvas.toDataURL("image/png", 0.92), x: marginX, y: marginY, w: maxW, h: Math.min(maxH, targetH) });
+    y += h;
+  }
 }
 
 function addPptTitleSlide(pptx, title) {
   const slide = pptx.addSlide();
   slide.background = { color: "FFFFFF" };
-  slide.addText(String(title || "문서 초안"), { x: 0.7, y: 1.9, w: 11.9, h: 0.8, fontFace: "Arial", fontSize: 34, bold: true, color: "172033", fit: "shrink" });
-  slide.addShape(pptx.ShapeType.line, { x: 0.7, y: 2.9, w: 11.9, h: 0, line: { color: "2F6BFF", width: 2 } });
+  slide.addText(String(title || "문서 초안"), { x: 0.7, y: 1.9, w: 11.9, h: 0.9, fontFace: "Arial", fontSize: 34, bold: true, color: "172033", fit: "shrink" });
+  slide.addText("────────────────────────", { x: 0.7, y: 2.85, w: 11.9, h: 0.25, fontFace: "Arial", fontSize: 14, color: "2F6BFF", fit: "shrink" });
   slide.addText(`Generated by Document Insight OS\n${new Date().toLocaleString("ko-KR")}`, { x: 0.7, y: 3.25, w: 11.9, h: 0.7, fontFace: "Arial", fontSize: 13, color: "65708A", fit: "shrink" });
 }
 
@@ -3376,7 +3410,7 @@ function addPptSectionSlide(pptx, title) {
   const slide = pptx.addSlide();
   slide.background = { color: "FFFFFF" };
   slide.addText(String(title || "섹션"), { x: 0.6, y: 0.55, w: 12.0, h: 0.6, fontFace: "Arial", fontSize: 25, bold: true, color: "172033", fit: "shrink" });
-  slide.addShape(pptx.ShapeType.line, { x: 0.6, y: 1.25, w: 12.0, h: 0, line: { color: "D9E2F2", width: 1 } });
+  slide.addText("────────────────────────", { x: 0.6, y: 1.18, w: 12.0, h: 0.25, fontFace: "Arial", fontSize: 10, color: "D9E2F2", fit: "shrink" });
 }
 
 function addPptTextSlide(pptx, title, text) {

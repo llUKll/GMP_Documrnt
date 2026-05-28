@@ -25,7 +25,7 @@
 Gemini API Key는 서버가 아니라 현재 브라우저 localStorage에 저장됩니다. 운영 서비스에서는 백엔드에서 키를 관리하는 구조가 안전합니다.
 ## Update Notes
 
-- 기본 Gemini 모델을 `gemini-2.5-flash-lite`로 변경했습니다.
+- 기본 Gemini 모델을 `gemini-2.5-pro`로 변경하고, 인허가 상세설계 문서용 2단계 분석 파이프라인을 추가했습니다.
 - 편집기 `검토 및 저장` 버튼은 오른쪽 하단에 고정되며, Gemini API Key가 있을 때 현재 편집 내용을 검토/보완한 뒤 저장합니다.
 - Gemini API Key가 없으면 현재 편집본만 브라우저 localStorage에 저장합니다.
 

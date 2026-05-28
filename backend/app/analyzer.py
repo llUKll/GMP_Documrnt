@@ -11,7 +11,7 @@ def build_draft(
     title: str,
     extracted_files: list[dict[str, Any]],
     gemini_api_key: str = "",
-    gemini_model: str = "gemini-2.5-flash-lite",
+    gemini_model: str = "gemini-2.5-pro",
 ) -> DraftDocument:
     context = normalize_context(extracted_files)
     blocks: list[Block] = []

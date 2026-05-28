@@ -2,22 +2,24 @@ const STORAGE_SETTINGS = "document-insight-settings-v2";
 const STORAGE_LAST_PROJECT = "document-insight-last-project-v2";
 const STORAGE_PROJECT_PREFIX = "document-insight-project-v2:";
 
-const DEFAULT_MODEL = "gemini-2.5-flash-lite";
+const DEFAULT_MODEL = "gemini-2.5-pro";
+const FALLBACK_MODEL = "gemini-2.5-flash";
+const MODEL_PRESETS = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
 const MAX_FILES = 10;
 const MAX_REFERENCE_FILES = 1;
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".png", ".jpg", ".jpeg", ".webp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"];
 const MAX_EXTRACT_CHARS_PER_FILE = 45000;
-const MAX_GEMINI_INPUT_CHARS = 120000;
+const MAX_GEMINI_INPUT_CHARS = 180000;
 const ZIP_MAX_LIST_ITEMS = 160;
 const ZIP_MAX_TEXT_ENTRIES = 70;
 const ZIP_MAX_DOCUMENT_ENTRIES = 10;
 const ZIP_ENTRY_TEXT_LIMIT = 7000;
 const ZIP_TOTAL_TEXT_LIMIT = 42000;
-const ZIP_MAX_MEDIA_ASSETS = 12;
+const ZIP_MAX_MEDIA_ASSETS = 18;
 const IMAGE_EXPORT_MAX_WIDTH = 1200;
 const IMAGE_EXPORT_MAX_HEIGHT = 900;
-const IMAGE_EXPORT_QUALITY = 0.78;
+const IMAGE_EXPORT_QUALITY = 0.82;
 const DEFAULT_DOCUMENT_MODE = "regulatory";
 const REGULATORY_SKILL_VERSION = "regulatory-doc-generator-v1";
 const SHARE_STATE_VERSION = 1;
@@ -115,10 +117,20 @@ function render() {
         <section class="panel">
           <label for="gemini-key" class="label">Gemini API Key</label>
           <input id="gemini-key" type="password" placeholder="${state.settings.gemini_api_key ? "저장된 키 사용 중" : "AIza..."}" />
-          <label for="gemini-model" class="label">Gemini 모델</label>
-          <input id="gemini-model" value="${escapeAttr(state.settings.gemini_model || DEFAULT_MODEL)}" />
+          <label for="gemini-model" class="label">Gemini 모델 선택</label>
+          <select id="gemini-model">
+            <option value="gemini-2.5-pro" ${(state.settings.gemini_model || DEFAULT_MODEL) === "gemini-2.5-pro" ? "selected" : ""}>gemini-2.5-pro · 상세설계/인허가 문서 권장</option>
+            <option value="gemini-2.5-flash" ${(state.settings.gemini_model || DEFAULT_MODEL) === "gemini-2.5-flash" ? "selected" : ""}>gemini-2.5-flash · 속도/품질 균형</option>
+            <option value="gemini-2.5-flash-lite" ${(state.settings.gemini_model || DEFAULT_MODEL) === "gemini-2.5-flash-lite" ? "selected" : ""}>gemini-2.5-flash-lite · 간단 요약/저비용</option>
+          </select>
+          <label for="pipeline-mode" class="label">생성 품질 모드</label>
+          <select id="pipeline-mode">
+            <option value="high_quality" ${(state.settings.pipeline_mode || "high_quality") === "high_quality" ? "selected" : ""}>고품질 2단계 분석 + 최종 검토</option>
+            <option value="two_step" ${(state.settings.pipeline_mode || "high_quality") === "two_step" ? "selected" : ""}>2단계 분석</option>
+            <option value="single_pass" ${(state.settings.pipeline_mode || "high_quality") === "single_pass" ? "selected" : ""}>단일 생성</option>
+          </select>
           <button id="save-settings" type="button" ${state.busy ? "disabled" : ""}>Gemini 설정 저장</button>
-          <small>${state.settings.gemini_api_key ? "Gemini 직접 호출이 켜져 있습니다. 키는 이 브라우저 localStorage에만 저장됩니다." : "키가 없으면 로컬 요약기로 초안을 생성합니다."}</small>
+          <small>${state.settings.gemini_api_key ? "상세설계 문서는 gemini-2.5-pro + 고품질 2단계 분석을 권장합니다. 키는 이 브라우저 localStorage에만 저장됩니다." : "키가 없으면 이미지 해석 없는 로컬 SDF 템플릿으로 초안을 생성합니다."}</small>
         </section>
 
         <section class="panel reference-panel">
@@ -143,10 +155,8 @@ function render() {
           </div>
           <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
           <div id="drop-zone" class="drop-zone">파일을 여기에 드래그하거나 파일 선택을 누르세요.</div>
-          <label for="file-path" class="label">파일명 또는 로컬 파일 경로</label>
-          <input id="file-path" placeholder="브라우저 보안상 경로 직접 업로드는 지원하지 않습니다." disabled />
-          <button id="upload-path" type="button" ${state.busy ? "disabled" : ""}>경로 업로드 안내</button>
-          <button id="analyze" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>분석 및 초안 생성</button>
+
+          <button id="analyze" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>2단계 분석 및 상세설계 생성</button>
           <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>Word 다운로드</button>
         </section>
 
@@ -193,6 +203,7 @@ function fileStripTemplate() {
         <span class="count-badge">${totalDisplayCount}개</span>
       </div>
       <p class="helper-text">참조파일은 결과물의 형식 기준으로, 첨부파일은 실제 분석 근거로 사용합니다. 각 파일 칩을 클릭하면 추출 텍스트와 메타데이터를 열어볼 수 있습니다.</p>
+      ${analysisPipelineTemplate()}
 
       <div class="file-group">
         <div class="file-group-heading">
@@ -429,17 +440,51 @@ function blockBody(block, content) {
   return `<input data-field="alt" value="${escapeAttr(content.alt || "")}" />`;
 }
 
+
+function analysisPipelineTemplate() {
+  const bundle = state.project?.analysis_bundle;
+  if (!state.project) return "";
+  const modeLabel = {
+    high_quality: "고품질 2단계 분석 + 최종 검토",
+    two_step: "2단계 분석",
+    single_pass: "단일 생성",
+  }[state.settings.pipeline_mode || "high_quality"] || "고품질 2단계 분석";
+  const imageCount = bundle?.screen_map?.length || collectEvidenceImages(state.project.files || []).length || 0;
+  const quality = bundle?.quality_score ? `${bundle.quality_score}/100` : "생성 전";
+  const steps = [
+    ["1", "첨부자료 인벤토리", bundle?.inventory?.length ? `${bundle.inventory.length}개 분류 완료` : "대기"],
+    ["2", "화면/이미지 기능 매핑", bundle?.screen_map?.length ? `${bundle.screen_map.length}개 화면 매핑` : `${imageCount}개 이미지 후보`],
+    ["3", "SDD/SDS 상세설계 생성", state.project?.draft ? "초안 생성됨" : "대기"],
+    ["4", "품질 점검/보정", quality],
+  ];
+  return `
+    <div class="analysis-pipeline-card">
+      <div class="analysis-pipeline-head">
+        <strong>상세설계 생성 파이프라인</strong>
+        <span>${escapeHtml(modeLabel)}</span>
+      </div>
+      <div class="pipeline-steps">
+        ${steps.map(([no, label, status]) => `
+          <div class="pipeline-step">
+            <b>${escapeHtml(no)}</b>
+            <span>${escapeHtml(label)}</span>
+            <small>${escapeHtml(status)}</small>
+          </div>
+        `).join("")}
+      </div>
+      ${bundle?.screen_map?.length ? `<p class="helper-text">대표 화면 분류: ${escapeHtml(bundle.screen_map.slice(0, 6).map(item => item.screen || item.category || item.filename).join(" · "))}</p>` : ""}
+    </div>
+  `;
+}
+
 function bindEvents() {
   document.getElementById("create-project")?.addEventListener("click", createProject);
   document.getElementById("save-settings")?.addEventListener("click", saveSettings);
-  ["doc-mode", "product-name", "software-version", "target-hardware", "target-regulator", "intended-use"].forEach(id => {
+  ["doc-mode", "gemini-model", "pipeline-mode", "product-name", "software-version", "target-hardware", "target-regulator", "intended-use"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", saveSettings);
   });
   document.getElementById("reference-files")?.addEventListener("change", uploadReferenceFiles);
   document.getElementById("files")?.addEventListener("change", uploadFiles);
-  document.getElementById("upload-path")?.addEventListener("click", () => {
-    pushToast("info", "경로 업로드 안내", "GitHub Pages 정적 모드에서는 로컬 경로를 직접 읽을 수 없습니다. 파일 선택 또는 드래그 앤 드롭을 사용하세요.");
-  });
   const dropZone = document.getElementById("drop-zone");
   dropZone?.addEventListener("dragover", event => {
     event.preventDefault();
@@ -740,6 +785,7 @@ function publicSettingsFromPayload(settings) {
   return {
     gemini_model: settings.gemini_model || DEFAULT_MODEL,
     document_mode: settings.document_mode || DEFAULT_DOCUMENT_MODE,
+    pipeline_mode: settings.pipeline_mode || "high_quality",
     product_name: settings.product_name || "",
     software_version: settings.software_version || "",
     target_hardware: settings.target_hardware || "",
@@ -806,6 +852,7 @@ function saveSettings() {
     ...state.settings,
     gemini_model: model,
     document_mode: document.getElementById("doc-mode")?.value || state.settings.document_mode || DEFAULT_DOCUMENT_MODE,
+    pipeline_mode: document.getElementById("pipeline-mode")?.value || state.settings.pipeline_mode || "high_quality",
     product_name: document.getElementById("product-name")?.value?.trim() || "",
     software_version: document.getElementById("software-version")?.value?.trim() || "",
     target_hardware: document.getElementById("target-hardware")?.value?.trim() || "",
@@ -1436,39 +1483,312 @@ function isAndroidEvidencePath(name) {
 
 async function analyzeProject() {
   if (!state.project?.files?.length) return;
-  await withStatus("인허가 문서 초안을 생성하는 중입니다.", async () => {
-    const parsedFiles = state.project.files.filter(file => file.parsed_status === "parsed" && file.text?.trim());
+  await withStatus("첨부자료를 분류하고 상세설계 초안을 생성하는 중입니다.", async () => {
+    const parsedFiles = state.project.files.filter(file => file.parsed_status === "parsed" && (file.text?.trim() || file.assets?.length));
     const referenceFiles = getParsedReferenceFiles();
-    if (!parsedFiles.length) throw new Error("분석 가능한 파일 텍스트가 없습니다.");
+    if (!parsedFiles.length) throw new Error("분석 가능한 파일 텍스트 또는 이미지 근거가 없습니다.");
     state.project.document_profile = currentDocumentProfile();
+
+    const mode = state.settings.pipeline_mode || "high_quality";
+    const regulatoryMode = (state.settings.document_mode || DEFAULT_DOCUMENT_MODE) !== "report";
+    let analysisBundle = buildLocalAnalysisBundle(parsedFiles, referenceFiles);
+    state.project.analysis_bundle = analysisBundle;
+    persistProject(false);
+
+    if (state.settings.gemini_api_key && regulatoryMode && mode !== "single_pass") {
+      state.status = "1/4 Gemini가 ZIP 내부 이미지와 파일 목록을 화면/기능별로 분류하는 중입니다.";
+      render();
+      try {
+        const remoteBundle = await generateEvidenceMapWithGemini(parsedFiles, referenceFiles, analysisBundle);
+        analysisBundle = normalizeAnalysisBundle(remoteBundle, analysisBundle);
+        state.project.analysis_bundle = analysisBundle;
+        persistProject(false);
+      } catch (error) {
+        console.warn("Gemini evidence map failed; keep local analysis", error);
+        pushToast("error", "1단계 분석 보정", `${error.message} 로컬 근거 맵으로 계속 진행합니다.`, false);
+      }
+    }
 
     let draft;
     if (state.settings.gemini_api_key) {
-      state.status = state.settings.document_mode === "report"
-        ? "Gemini API로 일반 보고서 초안을 생성하는 중입니다."
-        : "Gemini API로 인허가 문서 초안을 생성하는 중입니다.";
+      state.status = regulatoryMode
+        ? "2/4 Gemini가 SDD/SDS 상세설계 본문을 작성하는 중입니다."
+        : "Gemini API로 일반 보고서 초안을 생성하는 중입니다.";
       render();
       try {
-        draft = await generateDraftWithGemini(parsedFiles, referenceFiles);
+        draft = await generateDraftWithGemini(parsedFiles, referenceFiles, analysisBundle);
+        if (regulatoryMode && mode === "high_quality") {
+          state.status = "3/4 Gemini가 인허가 문서 심사관 관점으로 품질을 검토하고 보강하는 중입니다.";
+          render();
+          draft = await reviewRegulatoryDraftWithGemini(draft, parsedFiles, referenceFiles, analysisBundle);
+        }
       } catch (error) {
         console.warn("Gemini generation failed; fallback to local draft", error);
-        pushToast("error", "Gemini 응답 보정 실패", `${error.message} 로컬 체크리스트 초안으로 대체합니다.`, false);
+        pushToast("error", "Gemini 응답 보정 실패", `${error.message} 로컬 SDF 초안으로 대체합니다.`, false);
         draft = generateLocalDraft(parsedFiles, error.message, referenceFiles);
       }
     } else {
       draft = generateLocalDraft(parsedFiles, "", referenceFiles);
     }
 
+    state.status = regulatoryMode ? "4/4 화면 이미지와 근거표를 DOCX 본문에 배치하는 중입니다." : "초안 후처리 중입니다.";
+    render();
+    draft = reinforceDraftWithAnalysis(draft, analysisBundle, parsedFiles, referenceFiles);
     draft = attachEvidenceImagesToDraft(draft, parsedFiles);
-    state.project.draft = normalizeDraft(draft, state.project.title);
+    draft = regulatoryMode ? enforceProfessionalDraftQuality(draft, parsedFiles, referenceFiles, analysisBundle) : draft;
+    const normalized = normalizeDraft(draft, state.project.title);
+    const score = scoreRegulatoryDraftQuality(normalized, analysisBundle);
+    state.project.analysis_bundle = { ...analysisBundle, quality_score: score };
+    state.project.draft = normalized;
     state.project.updated_at = new Date().toISOString();
     persistProject();
-    state.status = state.settings.document_mode === "report"
-      ? "보고서 초안이 생성되었습니다. 화면에서 수정 후 Word로 다운로드하세요."
-      : "인허가 문서 초안이 생성되었습니다. [확인 필요] 항목을 검토한 뒤 Word로 다운로드하세요.";
-  }, "초안이 생성되었습니다.");
+    state.status = regulatoryMode
+      ? `S/W 상세설계파일 초안이 생성되었습니다. 품질 점수 ${score}/100 기준으로 [확인 필요] 항목을 검토하세요.`
+      : "보고서 초안이 생성되었습니다. 화면에서 수정 후 Word로 다운로드하세요.";
+  }, "상세설계 초안이 생성되었습니다.");
 }
 
+
+function currentGeminiModel() {
+  return state.settings.gemini_model || DEFAULT_MODEL;
+}
+
+function buildGeminiParts(prompt, files = [], options = {}) {
+  const parts = [{ text: String(prompt || "") }];
+  const maxImages = Number(options.maxImages || 0);
+  if (!maxImages) return parts;
+  const assets = collectEvidenceImages(files).slice(0, maxImages);
+  assets.forEach((asset, index) => {
+    const inline = dataUrlToInlineData(asset.dataUrl);
+    if (!inline) return;
+    parts.push({ text: `\n[IMAGE_EVIDENCE_${index + 1}] filename=${asset.name || asset.filename || "image"}; source=${asset.source || "첨부 ZIP"}; role=${asset.role || "screen evidence"}; caption_hint=${asset.caption || "화면 증거 이미지"}\n이 이미지를 화면명, 주요 UI 요소, 기능, SDD/SDS 연결 근거 관점으로 해석하세요.` });
+    parts.push({ inlineData: inline });
+  });
+  return parts;
+}
+
+function dataUrlToInlineData(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  return { mimeType: match[1] || "image/jpeg", data: match[2] };
+}
+
+async function callGeminiJson(prompt, options = {}) {
+  const model = currentGeminiModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.gemini_api_key)}`;
+  const finalPrompt = options.retryInstruction ? `${prompt}\n\n${options.retryInstruction}` : prompt;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: buildGeminiParts(finalPrompt, options.files || [], options) }],
+      generationConfig: {
+        temperature: Number.isFinite(options.temperature) ? options.temperature : 0.12,
+        maxOutputTokens: options.maxOutputTokens || 24576,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const message = payload?.error?.message || `Gemini API 호출 실패: HTTP ${response.status}`;
+    throw new Error(message);
+  }
+  const payload = await response.json();
+  const text = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n");
+  if (!text) throw new Error("Gemini 응답이 비어 있습니다.");
+  return parseDraftJson(text);
+}
+
+function buildLocalAnalysisBundle(files, referenceFiles = []) {
+  const images = collectEvidenceImages(files).slice(0, ZIP_MAX_MEDIA_ASSETS);
+  const inventory = files.map(file => ({
+    filename: file.filename,
+    extension: file.extension,
+    size: file.size,
+    type: classifyArtifact(file),
+    summary: file.summary || "요약 없음",
+  }));
+  const screen_map = images.map((asset, index) => inferScreenEvidenceFromAsset(asset, index));
+  const evidence_map = buildCurrentEvidenceRows(files).map(row => ({ category: row[0], finding: row[1], section: row[2] }));
+  const modules = buildModuleCandidatesFromEvidence(files, screen_map);
+  return {
+    version: 2,
+    generated_by: "local-browser-analysis",
+    model_recommended: DEFAULT_MODEL,
+    inventory,
+    reference_files: referenceFiles.map(file => ({ filename: file.filename, extension: file.extension, summary: file.summary || "" })),
+    screen_map,
+    evidence_map,
+    modules,
+    sdd_focus: ["User Interface", "System Operation", "Data Layer", "Report Export", "Network/Server Transfer", "Security"],
+    sds_focus: modules.map(item => item.design_id),
+    missing_items: buildMissingInfoRows(currentDocumentProfile(), files, referenceFiles).map(row => ({ item: row[0], evidence: row[1], priority: row[2] })),
+  };
+}
+
+function inferScreenEvidenceFromAsset(asset, index = 0) {
+  const name = String(asset.name || asset.filename || "").toLowerCase();
+  const source = String(asset.source || "");
+  const label = String(asset.caption || asset.name || `화면 증거 ${index + 1}`);
+  let screen = "화면 증거 이미지";
+  let category = "UI Evidence";
+  let design_use = "화면 구성, 사용자 입력, 출력 표시, 예외처리 검토 근거";
+  if (/login|home|main|start|로그인|로그인/.test(name)) { screen = "로그인/시작 화면"; category = "Login"; design_use = "운영 소프트웨어 접근, 권한/시작 흐름, 초기 화면 표시 근거"; }
+  else if (/patient|guest|number|user|환자|번호/.test(name)) { screen = "환자번호 입력/환자관리 화면"; category = "Patient Management"; design_use = "환자 식별정보 입력, 조회, 등록/수정/삭제 예외처리 근거"; }
+  else if (/profile|editor|select|프로파일|프로/.test(name)) { screen = "프로파일 선택/편집 화면"; category = "Profile"; design_use = "치료 프로파일 선택, 시간/압력 구간 편집, 저장 검증 근거"; }
+  else if (/run|treatment|chart|abt|oxygen|pressure|치료|운전|압력/.test(name)) { screen = "치료 운전/모니터링 화면"; category = "Treatment Run"; design_use = "목표/실측 압력 표시, 치료 상태 전이, ABT/환경정보 표시 근거"; }
+  else if (/log|record|history|report|pdf|export|운영|기록|내보내기/.test(name)) { screen = "치료기록/운영로그/보고서 화면"; category = "Log Report"; design_use = "치료 세션 조회, 운영로그 필터, PDF 미리보기/내보내기 근거"; }
+  return {
+    no: index + 1,
+    filename: asset.name || asset.filename || `image-${index + 1}`,
+    source,
+    screen,
+    category,
+    visible_elements: "[Gemini 이미지 분석 또는 수동 검토 필요]",
+    design_use,
+    sdd_section: category === "Log Report" ? "4.1.3 / 5.5" : category === "Treatment Run" ? "4.2 / 5.2" : "4.1.1 / 5.2",
+    confidence: "medium",
+    caption: label,
+  };
+}
+
+function buildModuleCandidatesFromEvidence(files, screenMap = []) {
+  const text = files.map(file => `${file.filename}\n${file.text || ""}`).join("\n");
+  const base = [
+    ["SDS-UI-001", "로그인/시작", "운영 프로그램 접근 및 초기 진입", /login|home|start|로그인|시작/i],
+    ["SDS-PAT-001", "환자번호 입력/환자관리", "환자 조회, 등록, 수정, 삭제", /patient|guest|환자|number|user/i],
+    ["SDS-PF-001", "프로파일 선택/편집", "치료 시간/압력 구간 설정 및 검증", /profile|프로파일|editor|section|pressure_time/i],
+    ["SDS-RUN-001", "치료 운전", "치료 시작, 상태 표시, 일시정지/재개/종료", /run|treatment|pressure|oxygen|abt|치료|압력/i],
+    ["SDS-LOG-001", "치료기록/운영로그", "세션 조회, 운영 이력 조회, 필터", /log|record|history|operation|room|database|로그|기록/i],
+    ["SDS-REP-001", "PDF 보고서/내보내기", "치료 상세 보고서와 운영로그 PDF 생성", /pdf|export|download|report|내보내기|보고서/i],
+    ["SDS-NET-001", "중앙 서버 전송/통신", "REST/WebSocket 기반 상태 수신 및 데이터 전송", /websocket|socket|api|server|https|전송|중앙/i],
+    ["SEC-001", "보안/감사추적", "접근통제, 개인정보, 무결성, 감사로그", /security|auth|token|encrypt|보안|권한|audit/i],
+  ];
+  return base.filter(row => row[3].test(text) || screenMap.some(item => row[3].test(`${item.screen} ${item.category} ${item.filename}`))).map(row => ({
+    design_id: row[0],
+    module: row[1],
+    description: row[2],
+    evidence: screenMap.filter(item => row[3].test(`${item.screen} ${item.category} ${item.filename}`)).map(item => item.filename).slice(0, 3),
+  }));
+}
+
+function slimAnalysisBundle(bundle) {
+  if (!bundle) return null;
+  return {
+    inventory: (bundle.inventory || []).slice(0, 30),
+    screen_map: (bundle.screen_map || []).slice(0, 18),
+    evidence_map: (bundle.evidence_map || []).slice(0, 20),
+    modules: (bundle.modules || []).slice(0, 20),
+    missing_items: (bundle.missing_items || []).slice(0, 20),
+  };
+}
+
+function normalizeAnalysisBundle(remote, fallback) {
+  const base = fallback || {};
+  const bundle = remote && typeof remote === "object" ? remote : {};
+  return {
+    ...base,
+    ...bundle,
+    inventory: Array.isArray(bundle.inventory) && bundle.inventory.length ? bundle.inventory : base.inventory || [],
+    screen_map: Array.isArray(bundle.screen_map) && bundle.screen_map.length ? bundle.screen_map : base.screen_map || [],
+    evidence_map: Array.isArray(bundle.evidence_map) && bundle.evidence_map.length ? bundle.evidence_map : base.evidence_map || [],
+    modules: Array.isArray(bundle.modules) && bundle.modules.length ? bundle.modules : base.modules || [],
+    missing_items: Array.isArray(bundle.missing_items) && bundle.missing_items.length ? bundle.missing_items : base.missing_items || [],
+    generated_by: bundle.generated_by || `gemini-${currentGeminiModel()}`,
+  };
+}
+
+async function generateEvidenceMapWithGemini(files, referenceFiles = [], localBundle = null) {
+  const prompt = buildEvidenceMapPrompt(files, referenceFiles, localBundle);
+  return callGeminiJson(prompt, {
+    files,
+    maxImages: 12,
+    temperature: 0.08,
+    maxOutputTokens: 12288,
+  });
+}
+
+function buildEvidenceMapPrompt(files, referenceFiles = [], localBundle = null) {
+  const profile = currentDocumentProfile();
+  const inventory = buildArtifactInventory(files, referenceFiles);
+  const localJson = JSON.stringify(slimAnalysisBundle(localBundle), null, 2).slice(0, 40000);
+  return `당신은 의료기기 소프트웨어 인허가 문서의 첨부자료 분석자입니다. 최종 문서를 바로 쓰지 말고, 먼저 ZIP 내부 이미지/보고서/파일을 SDD/SDS 작성 근거로 분류하세요.\n\n반드시 JSON 객체만 반환하세요. 마크다운 금지.\n\n반환 스키마:\n{\n  "generated_by":"gemini-evidence-map",\n  "inventory":[{"filename":"파일명","type":"Reference|Screen|Report|Log|AndroidCode|Other","summary":"근거 요약"}],\n  "screen_map":[{"no":1,"filename":"이미지 파일명","screen":"화면명","category":"Login|Patient|Profile|TreatmentRun|LogReport|Popup|Other","visible_elements":"보이는 UI 요소","design_use":"SDD/SDS에 반영할 설계 의미","sdd_section":"4.x/5.x","confidence":"high|medium|low"}],\n  "evidence_map":[{"category":"근거 분류","finding":"확인된 내용","section":"반영 섹션","limitations":"확인 필요"}],\n  "modules":[{"design_id":"SDS-...","module":"모듈명","description":"설계 의미","input":"입력","process":"처리","output":"출력","exception":"예외처리","evidence":["근거 파일"]}],\n  "missing_items":[{"item":"확인 필요 항목","evidence":"필요 근거","priority":"상|중|하"}]\n}\n\n분석 규칙:\n- 이미지마다 화면명을 구체화하세요. 예: 로그인 화면, 환자번호 입력, 프로파일 선택, 프로파일 에디터, 치료 운전, ABT/환경정보, 치료기록, 운영로그, 보고서 미리보기, 삭제 확인 팝업.\n- 이미지를 보고 보이는 UI 요소를 요약하세요. 임의로 안 보이는 내용은 쓰지 마세요.\n- 각 화면이 SDD/SDS 어느 항목의 근거인지 연결하세요.\n- HWP 본문 추출 실패는 한계로만 기록하고, IB-SDF 양식 적용 자체를 포기하지 마세요.\n\n현재 설정:\n- 프로그램명: ${profile.product_name || "[확인 필요]"}\n- 버전: ${profile.software_version || "[확인 필요]"}\n- 대상 장비: ${profile.target_hardware || "[확인 필요]"}\n\n파일 분류 힌트:\n${inventory}\n\n로컬 1차 분석:\n${localJson}`;
+}
+
+async function reviewRegulatoryDraftWithGemini(draft, files, referenceFiles = [], analysisBundle = null) {
+  const draftJson = JSON.stringify(stripImagesForGemini(draft)).slice(0, MAX_GEMINI_INPUT_CHARS);
+  const prompt = `당신은 의료기기 SW 인허가 문서 심사 대응 편집자입니다. 아래 S/W 상세설계파일 초안을 검토하고, 제가 직접 작성한 수준에 가깝게 보강하세요.\n\n반드시 JSON 객체만 반환하세요. image 블록은 만들지 말고, 텍스트/표/다이어그램 블록만 반환하세요. 이후 시스템이 기존 이미지를 다시 삽입합니다.\n\n보강 기준:\n- SDD 4장은 화면별 기능 설명을 구체화하세요. 화면 목적, 입력, 처리, 출력, 예외처리, 인허가 검증 포인트를 포함하세요.\n- SDS 5장은 모듈별 설계 ID와 입력/처리/출력/예외처리/검증 방법을 표로 상세화하세요.\n- 이미지 분석 결과를 화면-설계 매핑 표에 반영하세요.\n- "확인 필요"는 필요한 곳에만 쓰고, 화면/파일명/PDF 항목으로 확인되는 기능은 적극적으로 설계 문장으로 정리하세요.\n- HWP 추출 제한 문구가 본문을 지배하지 않게 하세요.\n- 요구사항 추적성 매트릭스, 사이버보안, PDF 산출물 필드 매핑, 데이터 모델을 반드시 유지/강화하세요.\n\n1단계 분석 결과:\n${JSON.stringify(slimAnalysisBundle(analysisBundle), null, 2).slice(0, 50000)}\n\n현재 초안 JSON:\n${draftJson}`;
+  try {
+    const reviewed = await callGeminiJson(prompt, { files, maxImages: 0, temperature: 0.08, maxOutputTokens: 24576 });
+    return ensureRegulatoryDraftQuality(reviewed, files, referenceFiles, "Gemini 최종 검토 결과가 품질 기준에 미달하여 보정");
+  } catch (error) {
+    pushToast("error", "최종 검토 보정 실패", `${error.message} 1차 초안으로 계속 진행합니다.`, false);
+    return draft;
+  }
+}
+
+function stripImagesForGemini(draft) {
+  return {
+    title: draft?.title || "",
+    blocks: (draft?.blocks || []).filter(block => block.type !== "image").slice(0, 120),
+  };
+}
+
+function reinforceDraftWithAnalysis(draft, analysisBundle, files, referenceFiles = []) {
+  if ((state.settings.document_mode || DEFAULT_DOCUMENT_MODE) === "report") return draft;
+  const normalized = draft && Array.isArray(draft.blocks) ? draft : generateRegulatoryLocalDraft(files, "초안 구조 보정", referenceFiles);
+  const text = JSON.stringify(normalized);
+  const additions = [];
+  let order = (normalized.blocks || []).length + 1;
+  const add = block => additions.push({ ...block, order: order++ });
+  if (!/화면[- ]?설계 매핑|화면 증거 이미지|screen_map/i.test(text) && analysisBundle?.screen_map?.length) {
+    add(headingBlock(0, 3, "4.1.1.1 화면 증거 이미지 및 화면-설계 매핑"));
+    add(paragraphBlock(0, "첨부 ZIP 내부에서 추출한 대표 화면 이미지는 사용자 인터페이스 설계와 기능 명세의 직접 근거로 사용한다. 각 화면은 화면명, 주요 UI 요소, 설계 활용 목적, SDD/SDS 반영 위치로 분류한다."));
+    add(tableBlock(0, "화면 이미지-설계 항목 매핑", ["번호", "파일명", "화면명", "주요 UI 요소", "설계 활용", "반영 위치", "신뢰도"], (analysisBundle.screen_map || []).slice(0, 18).map(item => [
+      item.no || "-", item.filename || "-", item.screen || item.category || "화면명 확인 필요", item.visible_elements || "[확인 필요]", item.design_use || "설계 근거", item.sdd_section || "4.1.1/5.2", item.confidence || "medium"
+    ])));
+  }
+  if (!/예외처리 및 검증 포인트/i.test(text)) {
+    add(headingBlock(0, 3, "5.6 예외처리 및 검증 포인트"));
+    add(tableBlock(0, "예외처리 및 검증 포인트", ["구분", "예외 상황", "소프트웨어 처리", "검증 방법", "근거"], [
+      ["환자정보", "미등록 환자번호 또는 필수값 누락", "등록 유도, 확인 버튼 제한, 오류 메시지 표시", "입력값 경계/누락 시험", "환자번호 입력/등록 화면"],
+      ["프로파일", "최대압력·상승률·종료압력 조건 불만족", "저장 제한 또는 사용자 경고", "프로파일 저장 검증 시험", "프로파일 선택/편집 화면"],
+      ["치료 운전", "중복 시작/일시정지/종료 명령", "상태별 버튼 활성 제어 및 로딩 차단", "상태 전이 시험", "치료 운전 화면"],
+      ["통신", "서버/제어부 응답 실패", "사용자 알림, 재시도, 로컬 로그 보관", "통신 장애/재연결 시험", "REST/WebSocket 근거"],
+      ["보고서", "세션 상세 로그 누락 또는 PDF 생성 실패", "내보내기 제한, 오류 표시, 재시도", "PDF 산출물 일치성 시험", "HBOT/Operation Logs PDF"],
+    ]));
+  }
+  return { ...normalized, blocks: [...(normalized.blocks || []), ...additions] };
+}
+
+function scoreRegulatoryDraftQuality(draft, analysisBundle = null) {
+  const text = JSON.stringify(draft || {});
+  const blocks = draft?.blocks || [];
+  let score = 0;
+  const required = ["제·개정", "개요", "용어정의", "S/W 아키텍처", "S/W 설계 기술서", "S/W 설계 명세서", "사이버보안", "요구사항 추적성", "첨부자료 분석"];
+  score += required.filter(item => text.includes(item)).length * 6;
+  score += Math.min(18, blocks.filter(block => block.type === "table").length * 2);
+  score += Math.min(12, blocks.filter(block => block.type === "image").length * 2);
+  score += /화면 이미지-설계 항목 매핑|화면 증거 이미지/.test(text) ? 8 : 0;
+  score += /예외처리 및 검증 포인트/.test(text) ? 6 : 0;
+  score += /데이터 모델/.test(text) ? 5 : 0;
+  score += /PDF 산출물 필드 매핑/.test(text) ? 5 : 0;
+  score += /Room DB|WebSocket|REST API|중앙 서버/.test(text) ? 5 : 0;
+  score += analysisBundle?.screen_map?.length ? 5 : 0;
+  const hwpExcuses = (text.match(/본문 추출|추출 제한|확인할 수 없습니다/g) || []).length;
+  score -= Math.min(15, hwpExcuses * 2);
+  return Math.max(0, Math.min(100, score));
+}
+
+function enforceProfessionalDraftQuality(draft, files, referenceFiles = [], analysisBundle = null) {
+  let candidate = ensureRegulatoryDraftQuality(draft, files, referenceFiles, "초안 품질 기준 미달로 내장 상세설계 구조 보정");
+  candidate = reinforceDraftWithAnalysis(candidate, analysisBundle, files, referenceFiles);
+  const score = scoreRegulatoryDraftQuality(candidate, analysisBundle);
+  if (score >= 75) return candidate;
+  const local = generateRegulatoryLocalDraft(files, "품질 점수가 낮아 내장 S/W 상세설계파일 템플릿으로 재구성", referenceFiles);
+  return reinforceDraftWithAnalysis(local, analysisBundle, files, referenceFiles);
+}
 
 async function generateDocumentArchitecture() {
   if (!state.project?.files?.length) return;
@@ -1659,43 +1979,28 @@ function buildArchitectureEvidenceRows(files) {
   });
 }
 
-async function generateDraftWithGemini(files, referenceFiles = []) {
-  const model = state.settings.gemini_model || DEFAULT_MODEL;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.gemini_api_key)}`;
+async function generateDraftWithGemini(files, referenceFiles = [], analysisBundle = null) {
   const sourceText = buildGeminiSourceText(referenceFiles, files);
   const profile = currentDocumentProfile();
   const inventory = buildArtifactInventory(files, referenceFiles);
   const prompt = state.settings.document_mode === "report"
     ? buildGenericReportPrompt(sourceText)
-    : buildRegulatoryPrompt(sourceText, profile, inventory);
+    : buildRegulatoryPrompt(sourceText, profile, inventory, analysisBundle);
 
   let lastError = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: attempt === 1 ? prompt : `${prompt}\n\n재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 이번에는 설명 없이 유효한 JSON 객체만 반환하세요. 마지막 문자는 반드시 } 여야 합니다.` }] }],
-        generationConfig: {
-          temperature: attempt === 1 ? 0.2 : 0.05,
-          maxOutputTokens: 16384,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      const message = payload?.error?.message || `Gemini API 호출 실패: HTTP ${response.status}`;
-      throw new Error(message);
-    }
-
-    const payload = await response.json();
-    const text = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n");
-    if (!text) throw new Error("Gemini 응답이 비어 있습니다.");
     try {
-      const parsedDraft = parseDraftJson(text);
-      return state.settings.document_mode === "report" ? parsedDraft : ensureRegulatoryDraftQuality(parsedDraft, files, referenceFiles, "Gemini 초안이 IB-SDF 상세설계파일 기준에 미달하여 보정");
+      const payload = await callGeminiJson(prompt, {
+        files,
+        maxImages: state.settings.document_mode === "report" ? 0 : 10,
+        temperature: attempt === 1 ? 0.18 : 0.05,
+        maxOutputTokens: 24576,
+        retryInstruction: attempt === 1 ? "" : "재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 설명 없이 유효한 JSON 객체만 반환하세요. 마지막 문자는 반드시 } 여야 합니다.",
+      });
+      const parsedDraft = payload;
+      return state.settings.document_mode === "report"
+        ? parsedDraft
+        : ensureRegulatoryDraftQuality(parsedDraft, files, referenceFiles, "Gemini 초안이 IB-SDF 상세설계파일 기준에 미달하여 보정");
     } catch (error) {
       lastError = error;
     }
@@ -1754,18 +2059,22 @@ function buildGenericReportPrompt(sourceText) {
   return `당신은 한국어 보고서 작성 보조자입니다. 아래 참조파일과 첨부파일 추출 텍스트를 바탕으로 편집 가능한 문서 초안을 만드세요.\n\n규칙:\n- 반드시 JSON만 반환하세요. 마크다운 코드펜스 금지.\n- title은 한국어 파일명/문서명으로 작성하세요.\n- 참조파일이 제공된 경우 참조파일의 목차, 문체, 표/검토 메모 형식을 우선 따라가세요. 단, 첨부파일에 없는 사실은 새로 만들지 마세요.\n- blocks는 heading, paragraph, table, chart, diagram 중 필요한 타입을 사용하세요.\n- 근거가 부족한 내용은 추측하지 말고 '[확인 필요: ...]'라고 쓰세요.\n- JSON 문자열 안에는 제어문자를 넣지 말고 줄바꿈은 \\n 으로 이스케이프하세요.\n\nJSON 스키마:\n{"title":"문서 제목","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"요약"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"요약 문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"핵심 항목","headers":["항목","내용"],"rows":[["예시","내용"]]}}]}\n\n참조파일 및 첨부파일 추출 텍스트:\n${sourceText}`;
 }
 
-function buildRegulatoryPrompt(sourceText, profile, inventory) {
-  return `당신은 한국어 의료기기 소프트웨어 인허가 문서 작성자입니다. 목표는 "파일 분석 요약"이 아니라, 참조 양식에 맞춘 제출 검토용 S/W 상세설계파일 초안을 작성하는 것입니다.
+function buildRegulatoryPrompt(sourceText, profile, inventory, analysisBundle = null) {
+  const analysisJson = JSON.stringify(slimAnalysisBundle(analysisBundle), null, 2).slice(0, 50000);
+  return `당신은 한국어 의료기기 소프트웨어 인허가 문서 작성자이자 S/W 상세설계파일 심사 대응 편집자입니다. 목표는 "파일 분석 요약"이 아니라, 참조 양식에 맞춘 제출 검토용 S/W 상세설계파일 초안을 작성하는 것입니다.
 
-가장 중요한 품질 기준:
+절대 목표:
+- 최종 결과물은 IB-SDF 계열 S/W 상세설계파일이어야 합니다.
 - 참조파일이 IB-SDF, S/W 상세설계파일, 소프트웨어 상세설계파일 계열이면 HWP 본문 추출이 제한되어도 반드시 IB-SDF 형식의 본문 초안을 작성하세요.
-- "HWP 바이너리라 본문 추출이 제한됩니다"라는 설명만으로 2~5장을 비워두면 실패입니다. 이 문구는 검토 메모와 사용 근거 파일 표에만 넣으세요.
-- 본문에는 최소한 개요, 용어정의, S/W 아키텍처, S/W 설계 기술서, S/W 설계 명세서, 사이버보안, 추적성 매트릭스, 첨부자료 분석을 실제 문장과 표로 채우세요.
-- 참조파일은 문서 형식 기준, 첨부파일은 현재 구현 근거입니다. 둘을 혼동하지 마세요.
-- 첨부 ZIP 내부의 PDF 보고서, 운영로그, 스크린샷/영상 파일명, Android 프로젝트 파일명을 Current Evidence로 해석해서 기능 설계에 반영하세요.
-- 제출용 문안과 검토 메모를 분리하세요. 확인되지 않은 값은 [확인 필요: ...]로 표시하되, 문서 대부분을 [확인 필요]로 방치하지 마세요.
-- 사실, 수치, 성능 claim, 안전 claim은 발명하지 마세요. 하지만 화면/파일명/보고서 항목에서 확인 가능한 기능은 설계 문장으로 적극 정리하세요.
-- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.
+- "HWP 바이너리라 본문 추출이 제한됩니다"라는 설명만으로 2~5장을 비우면 실패입니다. 이 문구는 검토 메모와 사용 근거 파일 표에만 넣으세요.
+- 첨부 ZIP 내부 화면 이미지는 "화면 증거"입니다. 각 화면을 기능 단위로 해석해서 SDD/SDS에 연결하세요.
+- 이미지나 파일명에서 보이는 기능만 확정 표현하고, 확정할 수 없는 수치/성능/안전 claim은 [확인 필요: ...]로 표시하세요.
+
+작성 깊이 기준:
+- 4장 SDD는 화면별 상세설계, 상태/버튼 제어, 데이터 저장/산출물, 외부 연계, 보안 설계까지 포함해야 합니다.
+- 5장 SDS는 모듈 ID, 입력, 처리 로직, 출력, 예외처리, 검증 포인트를 표로 작성해야 합니다.
+- 단순 기능 목록이 아니라 "왜 이 설계가 필요한지"와 "어떤 근거 화면/파일에서 확인했는지"를 연결하세요.
+- 표만 나열하지 말고 각 장 시작부에 제출용 문단을 1~3개 포함하세요.
 
 현재 설정:
 - 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}
@@ -1777,38 +2086,43 @@ function buildRegulatoryPrompt(sourceText, profile, inventory) {
 첨부파일 분류 힌트:
 ${inventory}
 
-IB-SDF 계열 권장 목차와 작성 밀도:
-0. 제·개정 이력표: 개정번호, 일자, 이력 사항 표
-1. 개요: 목적, 적용범위, 개발 목표, 수행 역할 표
-2. 용어정의: S/W 아키텍처 설계도, SDD, SDS, HBOT, ATA, Treatment Profile, Room DB, WebSocket, REST API, PDF Export 등
-3. S/W 아키텍처 설계도: User Interface Layer, Application Logic Layer, Data Layer, Report Export Layer, Network Layer, Device/Controller Interface 표와 텍스트 다이어그램
-4. S/W 설계 기술서: Operation Part, User Interface 화면별 기능, System Operation, 데이터 저장/산출물, Auto-Control, 외부 연계
-5. S/W 설계 명세서: Software Flow Chart, Module Design Specification 표, 프로파일 편집, 환자정보 관리, 보고서 생성/내보내기, 예외처리/검증 포인트
-6. 인허가·사이버보안 설계 고려사항: 접근통제, 환자정보 보호, 전송보안, 저장보안, 무결성, 감사추적, 오프라인/장애, 업데이트
+1단계 근거 분석 결과 JSON:
+${analysisJson || "[1단계 분석 결과 없음]"}
+
+필수 목차:
+0. 제·개정 이력표
+1. 개요 (Introduction)
+2. 용어정의 (Terminology and Definitions)
+3. S/W 아키텍처 설계도 (Software Architecture Design Chart)
+4. S/W 설계 기술서 (Software Design Description)
+  4.1 Operation Part
+  4.1.1 User Interface
+  4.1.1.1 화면 증거 이미지 및 화면-설계 매핑
+  4.1.2 System Operation
+  4.1.3 데이터 저장 및 산출물
+  4.2 Auto-Control Part
+  4.3 Interface Board 및 외부 연계
+  4.4 데이터 모델 및 산출물 상세
+5. S/W 설계 명세서 (Software Design Specification)
+  5.1 Software Flow Chart
+  5.2 Module Design Specification
+  5.3 프로파일 선택 및 편집 명세
+  5.4 환자정보 관리 명세
+  5.5 보고서 생성 및 내보내기 명세
+  5.6 예외처리 및 검증 포인트
+6. 인허가·사이버보안 설계 고려사항
 7. 요구사항 추적성 매트릭스 초안
-8. 첨부자료 분석 결과, 확인 필요 사항, 제출 전 체크리스트
+8. 첨부자료 분석 결과
+부록 A. 화면 및 산출물 증거 이미지
+부록 B. 제출 전 보완 체크리스트
 
 반환 JSON 스키마:
 {"title":"IBEX SW 상세설계파일 인허가 초안","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}},{"id":"b4","type":"diagram","order":3,"content":{"title":"흐름도","code":"텍스트 다이어그램"}}]}
 
-반드시 포함할 블록:
-- 표지 성격의 제목/문서정보 표
-- 목차 표
-- 0. 제·개정 이력표
-- 1. 개요 (Introduction)
-- 2. 용어정의 (Terminology and Definitions)
-- 3. S/W 아키텍처 설계도
-- 4. S/W 설계 기술서
-- 5. S/W 설계 명세서
-- 6. 인허가·사이버보안 설계 고려사항
-- 7. 요구사항 추적성 매트릭스 초안
-- 8. 첨부자료 분석 결과
-- 검토 메모 / 확인 필요 항목 / 사용한 근거 파일
-
 품질 실패 예시:
-- "참조파일 본문 추출이 제한되어 작성할 수 없습니다"만 반복
-- Reference Structure, Current Evidence Map, Submission-ready Draft 같은 작업 단계 제목만 쓰고 실제 SDD/SDS 본문을 쓰지 않음
+- Reference Structure, Current Evidence Map 같은 작업 단계 제목만 쓰고 실제 SDD/SDS 본문을 쓰지 않음
 - 파일 목록만 나열하고 치료 운전, 환자정보, 프로파일, 로그, PDF 내보내기, 서버 전송, 보안 설계로 해석하지 않음
+- 화면 증거 이미지와 설계 항목의 연결이 없음
 
 참조파일 및 첨부파일 추출 텍스트:
 ${sourceText}`;
@@ -2567,8 +2881,9 @@ function loadSettingsFromStorage() {
     const saved = JSON.parse(localStorage.getItem(STORAGE_SETTINGS) || "{}");
     return {
       gemini_api_key: saved.gemini_api_key || "",
-      gemini_model: !saved.gemini_model || saved.gemini_model === "gemini-2.5-flash" ? DEFAULT_MODEL : saved.gemini_model,
+      gemini_model: saved.gemini_model || DEFAULT_MODEL,
       document_mode: saved.document_mode || DEFAULT_DOCUMENT_MODE,
+      pipeline_mode: saved.pipeline_mode || "high_quality",
       product_name: saved.product_name || "",
       software_version: saved.software_version || "",
       target_hardware: saved.target_hardware || "",
@@ -2576,7 +2891,7 @@ function loadSettingsFromStorage() {
       intended_use: saved.intended_use || "",
     };
   } catch {
-    return { gemini_api_key: "", gemini_model: DEFAULT_MODEL, document_mode: DEFAULT_DOCUMENT_MODE, product_name: "", software_version: "", target_hardware: "", target_regulator: "", intended_use: "" };
+    return { gemini_api_key: "", gemini_model: DEFAULT_MODEL, document_mode: DEFAULT_DOCUMENT_MODE, pipeline_mode: "high_quality", product_name: "", software_version: "", target_hardware: "", target_regulator: "", intended_use: "" };
   }
 }
 
@@ -2585,6 +2900,7 @@ function saveSettingsToStorage(settings) {
     gemini_api_key: settings.gemini_api_key || "",
     gemini_model: settings.gemini_model || DEFAULT_MODEL,
     document_mode: settings.document_mode || DEFAULT_DOCUMENT_MODE,
+    pipeline_mode: settings.pipeline_mode || "high_quality",
     product_name: settings.product_name || "",
     software_version: settings.software_version || "",
     target_hardware: settings.target_hardware || "",

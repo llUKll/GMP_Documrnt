@@ -66,7 +66,7 @@ def get_settings() -> PublicSettings:
 def update_settings(payload: UpdateSettingsRequest) -> PublicSettings:
     current = load_settings()
     next_key = payload.gemini_api_key.strip() if payload.gemini_api_key is not None else current.gemini_api_key
-    next_model = payload.gemini_model.strip() or "gemini-2.5-flash-lite"
+    next_model = payload.gemini_model.strip() or "gemini-2.5-pro"
     check_message = ""
     if next_key:
         try:

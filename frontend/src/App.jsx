@@ -11,7 +11,7 @@ function App() {
   const [busyMessage, setBusyMessage] = useState("");
   const [status, setStatus] = useState("");
   const [toasts, setToasts] = useState([]);
-  const [settings, setSettings] = useState({ has_gemini_api_key: false, gemini_model: "gemini-2.5-flash-lite" });
+  const [settings, setSettings] = useState({ has_gemini_api_key: false, gemini_model: "gemini-2.5-pro" });
   const [limits, setLimits] = useState({
     supported_extensions: [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"],
     max_files_per_project: 10,
@@ -19,7 +19,7 @@ function App() {
     max_file_size_label: "200MB",
   });
   const [geminiKey, setGeminiKey] = useState("");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash-lite");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.5-pro");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -295,8 +295,12 @@ function App() {
             value={geminiKey}
             onChange={(event) => setGeminiKey(event.target.value)}
           />
-          <label className="label" htmlFor="gemini-model">Gemini 모델</label>
-          <input id="gemini-model" value={geminiModel} onChange={(event) => setGeminiModel(event.target.value)} />
+          <label className="label" htmlFor="gemini-model">Gemini 모델 선택</label>
+          <select id="gemini-model" value={geminiModel} onChange={(event) => setGeminiModel(event.target.value)}>
+            <option value="gemini-2.5-pro">gemini-2.5-pro · 상세설계/인허가 문서 권장</option>
+            <option value="gemini-2.5-flash">gemini-2.5-flash · 속도/품질 균형</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite · 간단 요약/저비용</option>
+          </select>
           <button onClick={saveSettings} disabled={busy}>Gemini 설정 저장</button>
           <small>{settings.has_gemini_api_key ? "Gemini 분석이 켜져 있습니다." : "키가 없으면 로컬 분석기로 생성합니다."}</small>
         </section>

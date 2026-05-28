@@ -6,7 +6,7 @@ const DEFAULT_MODEL = "gemini-2.5-flash-lite";
 const MAX_FILES = 10;
 const MAX_REFERENCE_FILES = 1;
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
-const SUPPORTED_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"];
+const SUPPORTED_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".png", ".jpg", ".jpeg", ".webp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"];
 const MAX_EXTRACT_CHARS_PER_FILE = 45000;
 const MAX_GEMINI_INPUT_CHARS = 120000;
 const ZIP_MAX_LIST_ITEMS = 160;
@@ -14,6 +14,10 @@ const ZIP_MAX_TEXT_ENTRIES = 70;
 const ZIP_MAX_DOCUMENT_ENTRIES = 10;
 const ZIP_ENTRY_TEXT_LIMIT = 7000;
 const ZIP_TOTAL_TEXT_LIMIT = 42000;
+const ZIP_MAX_MEDIA_ASSETS = 12;
+const IMAGE_EXPORT_MAX_WIDTH = 1200;
+const IMAGE_EXPORT_MAX_HEIGHT = 900;
+const IMAGE_EXPORT_QUALITY = 0.78;
 const DEFAULT_DOCUMENT_MODE = "regulatory";
 const REGULATORY_SKILL_VERSION = "regulatory-doc-generator-v1";
 const SHARE_STATE_VERSION = 1;
@@ -125,7 +129,7 @@ function render() {
             <span>지원 형식: ${escapeHtml(state.limits.supported_extensions.join(", "))}</span>
             <span>파일당 용량: ${escapeHtml(state.limits.max_file_size_label)}</span>
           </div>
-          <input id="reference-files" type="file" accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
+          <input id="reference-files" type="file" accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
           <small>예: 기존 인허가 문서 HWP/HWPX/DOCX/PDF 또는 해당 문서들을 묶은 ZIP. 참조파일의 사실관계는 그대로 복사하지 않고 형식 기준으로 사용합니다.</small>
         </section>
 
@@ -137,7 +141,7 @@ function render() {
             <span>최대 개수: ${state.project?.files?.length || 0}/${state.limits.max_files_per_project}개</span>
             <span>파일당 용량: ${escapeHtml(state.limits.max_file_size_label)}</span>
           </div>
-          <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
+          <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
           <div id="drop-zone" class="drop-zone">파일을 여기에 드래그하거나 파일 선택을 누르세요.</div>
           <label for="file-path" class="label">파일명 또는 로컬 파일 경로</label>
           <input id="file-path" placeholder="브라우저 보안상 경로 직접 업로드는 지원하지 않습니다." disabled />
@@ -285,6 +289,14 @@ function previewModalTemplate() {
           <h3>요약</h3>
           <p>${escapeHtml(summary)}</p>
         </section>
+        ${Array.isArray(file.media_assets) && file.media_assets.length ? `
+          <section class="preview-section">
+            <h3>추출 이미지</h3>
+            <div class="preview-image-grid">
+              ${file.media_assets.slice(0, 12).map(asset => `<figure><img src="${escapeAttr(asset.dataUrl || "")}" alt="${escapeAttr(asset.alt || asset.name || "이미지")}"/><figcaption>${escapeHtml(asset.caption || asset.name || "이미지")}</figcaption></figure>`).join("")}
+            </div>
+          </section>
+        ` : ""}
         <section class="preview-section">
           <h3>추출 텍스트</h3>
           <pre>${escapeHtml(text ? text.slice(0, 25000) : "공유 링크로 불러온 파일 정보이거나 첨부파일 원문을 제거한 상태라 원문 텍스트가 없습니다. 다시 첨부하면 추출 텍스트를 확인할 수 있습니다.")}</pre>
@@ -402,6 +414,16 @@ function blockBody(block, content) {
     return `
       <input class="caption" data-field="title" value="${escapeAttr(content.title || "")}" />
       <textarea class="code" data-field="code">${escapeHtml(content.code || "")}</textarea>
+    `;
+  }
+  if (block.type === "image") {
+    return `
+      <input class="caption" data-field="caption" value="${escapeAttr(content.caption || content.alt || "")}" />
+      <figure class="evidence-image-block">
+        ${content.dataUrl ? `<img src="${escapeAttr(content.dataUrl)}" alt="${escapeAttr(content.alt || content.caption || "증거 이미지")}" />` : `<div class="image-placeholder">이미지 데이터 없음</div>`}
+        <figcaption>${escapeHtml(content.source || content.filename || "첨부 이미지")}</figcaption>
+      </figure>
+      <input class="caption subtle" data-field="alt" value="${escapeAttr(content.alt || "")}" placeholder="대체 텍스트 / 검토 메모" />
     `;
   }
   return `<input data-field="alt" value="${escapeAttr(content.alt || "")}" />`;
@@ -957,8 +979,18 @@ async function parseSelectedFile(file) {
       base.text = await parseXlsx(file);
     } else if (extension === ".pdf") {
       base.text = await parsePdf(file);
+    } else if (isSupportedImageExtension(extension)) {
+      const asset = await createImageAssetFromBlob(file, file.name, { source: file.name, role: "direct-image" });
+      base.media_assets = asset ? [asset] : [];
+      base.text = createImageEvidenceText(file.name, base.media_assets[0]);
     } else if (extension === ".zip") {
-      base.text = await parseZip(file);
+      const parsedZip = await parseZip(file);
+      if (typeof parsedZip === "string") {
+        base.text = parsedZip;
+      } else {
+        base.text = parsedZip.text || "";
+        base.media_assets = parsedZip.media_assets || [];
+      }
     } else if (extension === ".hwpx") {
       base.text = await parseHwpx(file);
     } else if (extension === ".hwp") {
@@ -1125,7 +1157,179 @@ async function parseZip(file) {
       parts.push(`\n[ZIP FILE: ${name}]\n읽기 실패: ${error.message}`);
     }
   }
-  return parts.join("\n");
+  const mediaAssets = [];
+  const imageEntries = mediaEntries.filter(name => isZipImageEntry(name)).sort(zipEntrySort).slice(0, ZIP_MAX_MEDIA_ASSETS);
+  for (const name of imageEntries) {
+    try {
+      const entry = zip.file(name);
+      if (!entry) continue;
+      const blob = await zipEntryToBlob(entry, extensionOf(name));
+      const asset = await createImageAssetFromBlob(blob, name, { source: file.name, role: inferImageEvidenceRole(name) });
+      if (asset) mediaAssets.push(asset);
+    } catch (error) {
+      parts.push(`
+[ZIP IMAGE: ${name}]
+이미지 추출 실패: ${error.message}`);
+    }
+  }
+  if (mediaAssets.length) {
+    parts.push("", "[ZIP 내부 삽입 이미지]", ...mediaAssets.map((asset, index) => `- 그림 ${index + 1}: ${asset.name} / ${asset.caption} / ${asset.width || "?"}x${asset.height || "?"}`));
+  }
+  return { text: parts.join("\n"), media_assets: mediaAssets };
+}
+
+
+function isZipImageEntry(name) {
+  return /\.(png|jpe?g|webp)$/i.test(String(name || ""));
+}
+
+function isSupportedImageExtension(extension) {
+  return [".png", ".jpg", ".jpeg", ".webp"].includes(String(extension || "").toLowerCase());
+}
+
+function createImageEvidenceText(name, asset) {
+  const lines = [`[IMAGE: ${name}]`, "이미지 파일: 화면/산출물 증거 이미지", `추출 상태: ${asset ? "DOCX 삽입용 축소 이미지 생성" : "이미지 변환 실패"}`];
+  if (asset) {
+    lines.push(`이미지 크기: ${asset.width || "?"} x ${asset.height || "?"}`, `권장 캡션: ${asset.caption || asset.name || name}`);
+  }
+  return lines.join("\n");
+}
+
+function inferImageEvidenceRole(name) {
+  const lower = String(name || "").toLowerCase();
+  if (/login|home|main|시작|로그인/.test(lower)) return "login";
+  if (/patient|guest|user|환자|번호|등록|수정|삭제/.test(lower)) return "patient";
+  if (/profile|editor|select|프로파일|편집|선택/.test(lower)) return "profile";
+  if (/run|treatment|chart|abt|oxygen|pressure|치료|운전|압력|그래프|완료/.test(lower)) return "run";
+  if (/log|record|history|operation|report|pdf|내보내기|기록|운영/.test(lower)) return "log-report";
+  return "screen-evidence";
+}
+
+function makeImageCaption(name, role) {
+  const base = String(name || "첨부 이미지").split("/").pop();
+  const label = {
+    "login": "로그인/시작 화면 증거",
+    "patient": "환자정보 입력·관리 화면 증거",
+    "profile": "치료 프로파일 선택·편집 화면 증거",
+    "run": "치료 운전·상태 표시 화면 증거",
+    "log-report": "치료기록·운영로그·보고서 화면 증거",
+    "screen-evidence": "화면/산출물 증거 이미지",
+    "direct-image": "직접 첨부 이미지 근거"
+  }[role || "screen-evidence"] || "화면/산출물 증거 이미지";
+  return `${label}: ${base}`;
+}
+
+async function createImageAssetFromBlob(blob, name, options = {}) {
+  const role = options.role || inferImageEvidenceRole(name);
+  try {
+    const objectUrl = URL.createObjectURL(blob);
+    const image = await loadBrowserImage(objectUrl);
+    URL.revokeObjectURL(objectUrl);
+    const scaled = scaleImageSize(image.naturalWidth || image.width || IMAGE_EXPORT_MAX_WIDTH, image.naturalHeight || image.height || IMAGE_EXPORT_MAX_HEIGHT);
+    const canvas = document.createElement("canvas");
+    canvas.width = scaled.width;
+    canvas.height = scaled.height;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const dataUrl = canvas.toDataURL("image/jpeg", IMAGE_EXPORT_QUALITY);
+    return {
+      id: makeId("img"),
+      name: String(name || "image").slice(0, 240),
+      source: String(options.source || name || "첨부파일").slice(0, 240),
+      role,
+      caption: makeImageCaption(name, role),
+      alt: makeImageCaption(name, role),
+      dataUrl,
+      contentType: "image/jpeg",
+      extension: ".jpg",
+      width: scaled.width,
+      height: scaled.height,
+      originalWidth: image.naturalWidth || image.width || 0,
+      originalHeight: image.naturalHeight || image.height || 0,
+    };
+  } catch (error) {
+    console.warn("Image asset conversion failed", name, error);
+    return null;
+  }
+}
+
+function loadBrowserImage(url) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("이미지 로드 실패"));
+    image.src = url;
+  });
+}
+
+function scaleImageSize(width, height) {
+  const safeWidth = Math.max(1, Number(width) || IMAGE_EXPORT_MAX_WIDTH);
+  const safeHeight = Math.max(1, Number(height) || IMAGE_EXPORT_MAX_HEIGHT);
+  const ratio = Math.min(1, IMAGE_EXPORT_MAX_WIDTH / safeWidth, IMAGE_EXPORT_MAX_HEIGHT / safeHeight);
+  return { width: Math.round(safeWidth * ratio), height: Math.round(safeHeight * ratio) };
+}
+
+function collectEvidenceImages(files = []) {
+  const all = [];
+  for (const file of files || []) {
+    for (const asset of file.media_assets || []) {
+      if (asset?.dataUrl) all.push({ ...asset, parentFile: file.filename });
+    }
+  }
+  const seen = new Set();
+  return all.filter(asset => {
+    const key = `${asset.name}|${asset.dataUrl?.slice(0, 80)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function imageBlockFromAsset(asset, index = 0) {
+  return {
+    id: makeId("image"),
+    type: "image",
+    order: 0,
+    content: {
+      caption: asset.caption || `그림 ${index + 1}. 화면 증거 이미지`,
+      alt: asset.alt || asset.caption || "화면 증거 이미지",
+      source: asset.source || asset.parentFile || asset.name || "첨부 ZIP",
+      filename: asset.name || "image.jpg",
+      dataUrl: asset.dataUrl || "",
+      width: Number(asset.width || 0),
+      height: Number(asset.height || 0),
+      originalWidth: Number(asset.originalWidth || 0),
+      originalHeight: Number(asset.originalHeight || 0),
+    }
+  };
+}
+
+function buildEvidenceImageRows(files = []) {
+  return collectEvidenceImages(files).slice(0, ZIP_MAX_MEDIA_ASSETS).map((asset, index) => [
+    `그림 ${index + 1}`,
+    asset.caption || asset.name || "화면 증거 이미지",
+    asset.source || asset.parentFile || "첨부 ZIP",
+    asset.role || inferImageEvidenceRole(asset.name),
+    `${asset.originalWidth || asset.width || "?"} x ${asset.originalHeight || asset.height || "?"}`,
+  ]);
+}
+
+function attachEvidenceImagesToDraft(draft, files = []) {
+  if (!draft || !Array.isArray(draft.blocks)) return draft;
+  const images = collectEvidenceImages(files).slice(0, ZIP_MAX_MEDIA_ASSETS);
+  if (!images.length) return draft;
+  const hasImages = draft.blocks.some(block => block.type === "image" && block.content?.dataUrl);
+  if (hasImages) return draft;
+  let order = Math.max(-1, ...draft.blocks.map(block => Number(block.order) || 0)) + 1;
+  const extra = [
+    { ...headingBlock(0, 2, "부록 A. 화면 및 산출물 증거 이미지"), order: order++ },
+    { ...paragraphBlock(0, "첨부 ZIP 내부에서 추출한 대표 화면 이미지를 문서 검토용 증거로 삽입하였다. 각 이미지는 Word 문서 크기와 브라우저 저장 한계를 고려하여 축소된 사본이며, 원본은 첨부 ZIP에서 관리한다."), order: order++ },
+    { ...tableBlock(0, "화면 증거 이미지 매핑", ["번호", "캡션", "출처", "분류", "원본/추출 크기"], buildEvidenceImageRows(files)), order: order++ },
+    ...images.map((asset, index) => ({ ...imageBlockFromAsset(asset, index), order: order++ })),
+  ];
+  return { ...draft, blocks: [...draft.blocks, ...extra] };
 }
 
 function uniqueList(items) {
@@ -1255,6 +1459,7 @@ async function analyzeProject() {
       draft = generateLocalDraft(parsedFiles, "", referenceFiles);
     }
 
+    draft = attachEvidenceImagesToDraft(draft, parsedFiles);
     state.project.draft = normalizeDraft(draft, state.project.title);
     state.project.updated_at = new Date().toISOString();
     persistProject();
@@ -1542,7 +1747,7 @@ async function improveDraftWithGemini(draft) {
 }
 
 function buildDraftImprovementPrompt(draftJson, profile, sourceSummary) {
-  return `당신은 한국어 인허가/기술문서 편집 보조자입니다. 사용자가 화면에서 직접 수정한 현재 초안을 검토하고, 문장을 더 명확하고 제출용에 가깝게 보완하세요.\n\n핵심 규칙:\n- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.\n- 사용자가 편집한 의미, 순서, 표 구조를 최대한 보존하세요.\n- 임의로 규제/안전/성능/시험 결과를 만들지 마세요.\n- 근거가 부족한 문장은 '[확인 필요: ...]'로 표시하세요.\n- 중복 문장, 어색한 표현, 불명확한 용어를 정리하세요.\n- 제출용 문안과 검토 메모가 섞여 있으면 가능한 한 구분되게 다듬으세요.\n- 현재 초안이 문서 아키텍처이면 본문을 과도하게 확장하지 말고, 섹션 설계/근거 매핑/확인 필요 항목을 더 명확하게 보완하세요.\n- blocks 배열은 heading, paragraph, table, chart, diagram 타입만 사용하세요.\n- 기존 block의 id/order가 있으면 유지하고, 필요 시 새 id는 refine_1, refine_2 형식으로 만드세요.\n\n현재 설정:\n- 문서 모드: ${profile.document_mode || "regulatory"}\n- 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}\n- SW 버전/빌드: ${profile.software_version || "[확인 필요: SW 버전/빌드]"}\n- 대상 장비/하드웨어: ${profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"}\n- 대상 규제/기관: ${profile.target_regulator || "[확인 필요: 대상 규제/기관]"}\n- 사용 목적: ${profile.intended_use || "[확인 필요: 사용 목적]"}\n\n첨부파일 요약:\n${sourceSummary || "첨부파일 요약 없음"}\n\n반환 JSON 스키마:\n{"title":"문서 제목","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}}]}\n\n현재 편집 초안 JSON:\n${draftJson}`;
+  return `당신은 한국어 인허가/기술문서 편집 보조자입니다. 사용자가 화면에서 직접 수정한 현재 초안을 검토하고, 문장을 더 명확하고 제출용에 가깝게 보완하세요.\n\n핵심 규칙:\n- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.\n- 사용자가 편집한 의미, 순서, 표 구조를 최대한 보존하세요.\n- 임의로 규제/안전/성능/시험 결과를 만들지 마세요.\n- 근거가 부족한 문장은 '[확인 필요: ...]'로 표시하세요.\n- 중복 문장, 어색한 표현, 불명확한 용어를 정리하세요.\n- 제출용 문안과 검토 메모가 섞여 있으면 가능한 한 구분되게 다듬으세요.\n- 현재 초안이 문서 아키텍처이면 본문을 과도하게 확장하지 말고, 섹션 설계/근거 매핑/확인 필요 항목을 더 명확하게 보완하세요.\n- blocks 배열은 heading, paragraph, table, chart, diagram, image 타입을 사용할 수 있습니다. 단, Gemini 보완 단계에서는 기존 image 블록의 dataUrl은 절대 삭제하거나 변경하지 마세요.\n- 기존 block의 id/order가 있으면 유지하고, 필요 시 새 id는 refine_1, refine_2 형식으로 만드세요.\n\n현재 설정:\n- 문서 모드: ${profile.document_mode || "regulatory"}\n- 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}\n- SW 버전/빌드: ${profile.software_version || "[확인 필요: SW 버전/빌드]"}\n- 대상 장비/하드웨어: ${profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"}\n- 대상 규제/기관: ${profile.target_regulator || "[확인 필요: 대상 규제/기관]"}\n- 사용 목적: ${profile.intended_use || "[확인 필요: 사용 목적]"}\n\n첨부파일 요약:\n${sourceSummary || "첨부파일 요약 없음"}\n\n반환 JSON 스키마:\n{"title":"문서 제목","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}}]}\n\n현재 편집 초안 JSON:\n${draftJson}`;
 }
 
 function buildGenericReportPrompt(sourceText) {
@@ -1758,6 +1963,23 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
     ["운영로그 화면", "기간/필터 선택, 운영로그 목록, PDF 내보내기", "운영이력의 완전성, 필터 조건 기록, PDF 생성 시 생성일자/조건 표시 필요"],
     ["보고서 미리보기", "HBOT Treatment Report 미리보기, PDF 내보내기", "외부 반출 전 환자정보 포함 여부 고지, 저장 위치, 파일명 규칙, 무결성 관리 필요"],
   ]));
+  add(tableBlock(0, "UI 화면별 상세 설계 명세", ["설계 ID", "화면/기능", "주요 컴포넌트", "입력 데이터", "처리 로직", "출력/저장", "예외처리"], [
+    ["SDD-UI-001", "로그인/시작 화면", "제품 로고, 시작/로그인 버튼, 배경 영상 또는 이미지", "사용자 터치", "앱 구동 상태 확인 후 환자 입력 또는 홈 화면으로 전환", "로그인 상태, 다음 화면", "권한 미확인, 서버 미연결, 중복 클릭 차단"],
+    ["SDD-UI-002", "환자번호 입력", "숫자 키패드, 입력창, 등록/확인/초기화/닫기 버튼", "환자번호", "길이 제한 및 기존 환자 조회, 미등록 시 등록 유도", "선택 환자 정보, 세션 준비 상태", "미입력, 미등록, 중복 번호, 조회 실패"],
+    ["SDD-UI-003", "환자 등록/수정/삭제", "이름, 번호, 성별, 나이, 비고, 저장/삭제 버튼", "환자 식별정보", "필수값 검증 후 로컬 DB 저장 또는 갱신", "Patient 레코드", "필수값 누락, 삭제 확인, 치료기록 연결 환자 삭제 정책"],
+    ["SDD-UI-004", "프로파일 선택", "프로파일 카드, 차트, 총 시간, 최대 압력, 편집 버튼", "프로파일 선택 이벤트", "프로파일 데이터 로드 및 그래프 렌더링", "선택 프로파일 ID/명칭", "손상된 프로파일, 빈 프로파일, 최대압력 초과"],
+    ["SDD-UI-005", "프로파일 편집", "구간 목록, 시간/압력 입력, ABT/Monitor/Curve 옵션, 저장 버튼", "구간별 시간/압력/옵션", "상승률·최대압력·종료압력 검증 후 저장", "Profile 레코드", "상승률 초과, 마지막 압력 미복귀, 이름 중복"],
+    ["SDD-UI-006", "치료 운전", "압력 차트, 설정/실측 게이지, 환경정보, ABT, 시작/일시정지/종료 버튼", "센서 데이터, 단계 상태, 사용자 명령", "상태별 버튼 제어 및 실시간 차트 갱신", "세션 상태, 이벤트 로그", "통신 끊김, 센서 이상, 명령 실패, 안전압력 미도달"],
+    ["SDD-UI-007", "치료기록", "환자 목록, 세션 목록, 차트, 통계, 상세/삭제/내보내기 버튼", "검색/필터, 세션 선택", "DB 조회 및 차트/통계 재구성", "치료 상세 화면, PDF 생성 입력", "로그 누락, 환자정보 불일치, 삭제 권한"],
+    ["SDD-UI-008", "운영로그", "기간 필터, 최소 시간 조건, 로그 목록, PDF 내보내기", "날짜 범위, 필터 조건", "조건별 Operation Log 조회", "운영로그 PDF", "대용량 조회 성능, 필터 조건 누락, 페이지 분할"],
+  ]));
+  const evidenceImagesForBody = collectEvidenceImages(files).slice(0, Math.min(6, ZIP_MAX_MEDIA_ASSETS));
+  if (evidenceImagesForBody.length) {
+    add(headingBlock(0, 3, "4.1.1.1 화면 증거 이미지"));
+    add(paragraphBlock(0, "첨부 ZIP 내부의 대표 화면 이미지를 설계 근거로 삽입하였다. 이미지는 화면 라벨, 버튼, 차트, 보고서 미리보기 등 사용자 인터페이스 요구사항과 SDD/SDS 항목의 확인 근거로 사용한다."));
+    add(tableBlock(0, "화면 이미지-설계 항목 매핑", ["번호", "캡션", "출처", "분류", "원본/추출 크기"], buildEvidenceImageRows(files).slice(0, 6)));
+    evidenceImagesForBody.forEach((asset, index) => add(imageBlockFromAsset(asset, index)));
+  }
   add(headingBlock(0, 3, "4.1.2 System Operation"));
   add(tableBlock(0, "System Operation", ["Function", "Description"], [
     ["Login / Start", "운용 프로그램 접근 시작. 로그인 이후 환자번호 입력 또는 치료 시작 화면으로 진입한다."],
@@ -1789,6 +2011,14 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
     ["강제 종료/치료 완료", "종료 확인 후 치료를 종료하고 완료 화면으로 전환한다.", "안전 압력 도달 전 완료 전환 방지, 로그 저장 완료 조건 검증"],
     ["ABT/환경정보", "ABT 좌/우 그래프, 온도/습도/O₂/CO₂ 등 환경값을 표시한다.", "센서 채널별 정상/비정상 표시, 알람 처리 검증"],
   ]));
+  add(tableBlock(0, "치료 상태 및 버튼 제어 상세", ["상태", "허용 동작", "제한 동작", "저장/로그", "검증 포인트"], [
+    ["시작 대기", "프로파일 선택, 환자 변경, 치료 시작", "치료기록 확정 저장", "시작 전 설정값", "환자/프로파일 미선택 시 시작 제한"],
+    ["가압/유지/감압", "일시정지, 종료 요청, 상태 모니터링", "프로파일 구조 변경, 환자 변경", "센서값, 단계 이벤트", "실측 압력·목표 압력·상태 표시 일치성"],
+    ["일시정지", "재개, 제한된 압력 조정, 산소교체 등 보조 작업", "세션 종료 없는 화면 이탈", "일시정지/재개 시각", "중복 명령 방지, 재개 실패 처리"],
+    ["종료 요청", "종료 확인, 안전 감압 진행", "즉시 완료 처리", "종료 사유/시각", "안전압력 도달 전 완료 전환 방지"],
+    ["완료", "로그 저장, 보고서 조회/내보내기, 서버 전송", "치료 제어 명령", "세션 요약, Raw Log, PDF", "DB 저장 완료와 보고서 내용 일치성"],
+    ["통신 장애", "재연결, 사용자 알림, 로컬 보관", "확인 없는 데이터 폐기", "장애 이벤트", "재시도/오프라인 큐/중복 업로드 방지"],
+  ]));
   add(headingBlock(0, 3, "4.3 Interface Board 및 외부 연계"));
   add(tableBlock(0, "외부 연계", ["연계 대상", "방식", "주요 데이터", "비고"], [
     ["챔버 제어부", "REST API / WebSocket / 내부 제어 프로토콜 [확인 필요]", "치료 시작/중지/일시정지/재개, 목표 압력, 상태 이벤트", "실제 프로토콜 명세서 필요"],
@@ -1797,6 +2027,15 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
     ["로컬 저장소", "Room DB / 내부 파일 / SharedPreferences", "프로파일, 환자, 세션, 운영로그, 설정값", "백업/삭제/마이그레이션 정책 필요"],
   ]));
 
+  add(headingBlock(0, 3, "4.4 데이터 모델 및 산출물 상세"));
+  add(tableBlock(0, "데이터 모델 상세 초안", ["데이터 객체", "주요 필드", "생성/수정 시점", "사용 화면", "보안·무결성 고려사항"], [
+    ["Patient", "patientId, patientName, gender, age, remark", "환자 등록/수정", "환자번호 입력, 치료기록", "개인정보 최소수집, 삭제/수정 권한, 세션 연결 정책"],
+    ["Profile", "profileId, profileName, totalTime, pressure/time sections, options", "프로파일 저장/수정", "프로파일 선택/편집, 치료 운전", "상승률·최대압력·종료압력 검증, 변경 이력"],
+    ["TreatmentSession", "sessionId, patientId, profileId, start/end time, duration, maxPressure, result", "치료 시작/완료", "치료 운전, 치료기록, 보고서", "세션 ID 유일성, 저장 완료 전 완료 화면 전환 방지"],
+    ["RawDetailLog", "timestamp, pressure, oxygen, state, event, sensor values", "치료 중 주기 저장", "보고서, 차트, 이벤트 로그", "원본 보존, PDF와 원자료 추적성, 손상 감지"],
+    ["OperationLog", "timestamp, action, profile, patient, result, operator/device", "운영 이벤트 발생 시", "운영로그 화면, 운영로그 PDF", "감사추적, 필터 조건 기록, 삭제 권한"],
+    ["ReportFile", "reportId, sessionId, createdAt, fileName, filter, appVersion", "PDF 내보내기", "보고서 미리보기/다운로드", "환자정보 포함 고지, 파일명 규칙, 해시/무결성 검토"],
+  ]));
   add(headingBlock(0, 2, "5. S/W 설계 명세서 (Software Design Specification)"));
   add(headingBlock(0, 3, "5.1 Software Flow Chart"));
   add(paragraphBlock(0, "소프트웨어의 기본 운용 흐름은 로그인, 환자 확인, 프로파일 선택, 치료 시작, 치료 운전, 치료 완료, 치료기록 저장, 보고서 확인/내보내기 순서로 구성된다."));
@@ -1839,6 +2078,15 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
     ["HBOT Treatment Report", "환자명, 환자번호, 성별, 나이, 날짜/시간, 챔버, 프로파일, Duration, Pressure Profile, O₂ Concentration, Event Log", "치료기록 상세 미리보기 또는 내보내기 버튼 입력 시", "DB 데이터와 차트/이벤트 로그의 일치성, 환자정보 표시 정책"],
     ["Operation Logs Report", "생성일시, 필터, 최소 시간 조건, Count, 날짜, 프로파일, 시간, 최대 실제압력, 환자, 환자번호", "운영로그 화면 내보내기 버튼 입력 시", "필터 조건과 출력 목록의 일치성, 페이지 번호, 개인정보 포함 여부"],
   ]));
+  add(tableBlock(0, "PDF 산출물 필드 매핑 상세", ["보고서 필드", "데이터 출처", "생성 로직", "검증 기준", "보완 필요"], [
+    ["환자정보", "Patient DB / 현재 세션 환자 참조", "선택 환자와 세션을 연결하여 표시", "화면/DB/PDF의 환자번호 일치", "마스킹/권한 정책"],
+    ["치료 기본정보", "TreatmentSession", "시작/종료시각, Duration, Chamber, Profile 표시", "세션 요약과 PDF 일치", "장비 식별정보 확정"],
+    ["Pressure Profile", "RawDetailLog + Profile", "목표압력과 실측압력을 차트로 렌더링", "원자료 대비 차트 누락 없음", "샘플링 주기 명시"],
+    ["O₂ Concentration", "센서 로그", "산소농도 시계열 그래프 생성", "단위/스케일/결측 처리 검증", "센서 보정 근거"],
+    ["Event Log", "치료 상태 이벤트/사용자 조작 로그", "시각순 이벤트 목록 출력", "일시정지/재개/종료 이벤트 반영", "이벤트 코드 정의"],
+    ["운영로그 필터", "사용자 선택 날짜/최소시간/검색 조건", "PDF 상단에 생성일시와 조건 표시", "화면 목록 건수와 PDF Count 일치", "필터 조건 저장 정책"],
+    ["파일명/출력일", "앱 생성 로직", "보고서 종류+세션ID 또는 생성시각 기반 파일명", "중복 파일명 방지", "해시/전자서명 여부"],
+  ]));
 
   add(headingBlock(0, 2, "6. 인허가·사이버보안 설계 고려사항"));
   add(paragraphBlock(0, "본 소프트웨어는 환자정보, 치료이력, 운영로그 및 PDF 외부 반출 기능을 포함하므로, 인허가 제출 시 소프트웨어 안전성뿐 아니라 개인정보 보호, 로그 무결성, 접근통제, 전송보안, 저장보안, 백업/삭제 정책을 함께 설명해야 한다."));
@@ -1875,6 +2123,13 @@ function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles
   add(tableBlock(0, "사용한 근거 파일", ["파일명", "근거 유형", "비고"], inventoryRows.length ? inventoryRows.map(row => [row[0], row[1], row[4]]) : [["첨부파일 없음", "-", "-"]]));
   add(headingBlock(0, 2, "8.1 확인 필요 사항"));
   add(tableBlock(0, "확인 필요 항목", ["항목", "필요 근거", "우선순위"], missingRows));
+  const allEvidenceImages = collectEvidenceImages(files).slice(0, ZIP_MAX_MEDIA_ASSETS);
+  if (allEvidenceImages.length) {
+    add(headingBlock(0, 2, "부록 A. 화면 및 산출물 증거 이미지 전체"));
+    add(paragraphBlock(0, "아래 이미지는 첨부 ZIP에서 자동 추출한 대표 화면/산출물 이미지이다. 문서 최종화 시 각 이미지의 실제 화면명과 기능명을 확인하여 캡션을 확정한다."));
+    add(tableBlock(0, "증거 이미지 전체 목록", ["번호", "캡션", "출처", "분류", "원본/추출 크기"], buildEvidenceImageRows(files)));
+    allEvidenceImages.slice(6).forEach((asset, index) => add(imageBlockFromAsset(asset, index + 6)));
+  }
   add(headingBlock(0, 2, "부록. 제출 전 보완 체크리스트"));
   add(tableBlock(0, "제출 전 보완 체크리스트", ["구분", "확인 항목", "상태"], [
     ["문서정보", "문서번호, 제정일, 개정일, 개정번호, 작성/검토/승인자 확정", "☐"],
@@ -1972,6 +2227,19 @@ function normalizeBlockContent(type, content = {}) {
     };
   }
   if (type === "diagram") return { title: String(content.title || "다이어그램"), code: String(content.code || "") };
+  if (type === "image") {
+    return {
+      caption: String(content.caption || content.alt || "증거 이미지"),
+      alt: String(content.alt || content.caption || "증거 이미지"),
+      source: String(content.source || content.filename || "첨부파일"),
+      filename: String(content.filename || content.name || "image.jpg"),
+      dataUrl: String(content.dataUrl || ""),
+      width: Number(content.width || 0),
+      height: Number(content.height || 0),
+      originalWidth: Number(content.originalWidth || 0),
+      originalHeight: Number(content.originalHeight || 0),
+    };
+  }
   return { alt: String(content.alt || "") };
 }
 
@@ -2063,10 +2331,15 @@ async function downloadDocx() {
 
 async function buildDocxBlob(draft) {
   const zip = new window.JSZip();
+  const imageRels = collectDocxImageRelationships(draft);
+  const imageDefaults = imageRels.length ? `
+  <Default Extension="jpg" ContentType="image/jpeg"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
+  <Default Extension="png" ContentType="image/png"/>` : "";
   zip.file("[Content_Types].xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>${imageDefaults}
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
@@ -2078,10 +2351,15 @@ async function buildDocxBlob(draft) {
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
 </Relationships>`);
+  const imageRelXml = imageRels.map(item => `  <Relationship Id="${item.rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${item.filename}"/>`).join("\n");
   zip.folder("word").folder("_rels").file("document.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+${imageRelXml}
 </Relationships>`);
+  for (const item of imageRels) {
+    zip.folder("word").folder("media").file(item.filename, base64ToUint8Array(item.base64));
+  }
   zip.folder("docProps").file("core.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <dc:title>${xmlEscape(draft.title)}</dc:title>
@@ -2093,9 +2371,10 @@ async function buildDocxBlob(draft) {
   zip.folder("docProps").file("app.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>Document Insight OS</Application></Properties>`);
   zip.folder("word").file("styles.xml", wordStylesXml());
-  const bodyXml = draftToWordBodyXml(draft);
+  const imageRelMap = Object.fromEntries(imageRels.map(item => [item.blockId, item]));
+  const bodyXml = draftToWordBodyXml(draft, imageRelMap);
   zip.folder("word").file("document.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <w:body>
     ${bodyXml}
     <w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr>
@@ -2104,7 +2383,7 @@ async function buildDocxBlob(draft) {
   return zip.generateAsync({ type: "blob", mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
 }
 
-function draftToWordBodyXml(draft) {
+function draftToWordBodyXml(draft, imageRelMap = {}) {
   const blocks = [...draft.blocks].sort((a, b) => a.order - b.order);
   const parts = [paragraphXml(draft.title, "Title")];
   for (const block of blocks) {
@@ -2126,6 +2405,68 @@ function draftToWordBodyXml(draft) {
     }
   }
   return parts.join("\n");
+}
+
+
+function collectDocxImageRelationships(draft) {
+  const blocks = [...(draft?.blocks || [])].sort((a, b) => a.order - b.order);
+  const rels = [];
+  let imageIndex = 1;
+  for (const block of blocks) {
+    if (block.type !== "image" || !block.content?.dataUrl) continue;
+    const parsed = parseDataUrl(block.content.dataUrl);
+    if (!parsed) continue;
+    const ext = parsed.contentType === "image/png" ? "png" : "jpg";
+    rels.push({
+      blockId: block.id,
+      rid: `rIdImage${imageIndex}`,
+      filename: `image${imageIndex}.${ext}`,
+      contentType: parsed.contentType,
+      base64: parsed.base64,
+      width: Number(block.content.width || 960),
+      height: Number(block.content.height || 540),
+    });
+    imageIndex += 1;
+  }
+  return rels;
+}
+
+function parseDataUrl(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;]+);base64,(.+)$/);
+  if (!match) return null;
+  return { contentType: match[1], base64: match[2] };
+}
+
+function base64ToUint8Array(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function imageXml(rel, content = {}) {
+  const size = docxImageSize(Number(content.width || rel.width || 960), Number(content.height || rel.height || 540));
+  const name = xmlEscape(content.filename || rel.filename || "image");
+  const descr = xmlEscape(content.alt || content.caption || "증거 이미지");
+  return `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">
+    <wp:extent cx="${size.cx}" cy="${size.cy}"/>
+    <wp:docPr id="${Math.max(1, Math.floor(Math.random() * 100000))}" name="${name}" descr="${descr}"/>
+    <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+      <pic:pic>
+        <pic:nvPicPr><pic:cNvPr id="0" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr>
+        <pic:blipFill><a:blip r:embed="${rel.rid}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+        <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${size.cx}" cy="${size.cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+      </pic:pic>
+    </a:graphicData></a:graphic>
+  </wp:inline></w:drawing></w:r></w:p>`;
+}
+
+function docxImageSize(widthPx, heightPx) {
+  const maxCx = 5486400;
+  const cxRaw = Math.max(1, widthPx) * 9525;
+  const cyRaw = Math.max(1, heightPx) * 9525;
+  const ratio = Math.min(1, maxCx / cxRaw);
+  return { cx: Math.round(cxRaw * ratio), cy: Math.round(cyRaw * ratio) };
 }
 
 function paragraphXml(text, style = "Normal") {

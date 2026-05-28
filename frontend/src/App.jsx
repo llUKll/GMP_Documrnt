@@ -309,7 +309,7 @@ function App() {
             <span>최대 개수: {project?.files?.length || 0}/{limits.max_files_per_project}개</span>
             <span>파일당 용량: {limits.max_file_size_label}</span>
           </div>
-          <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" onChange={uploadFiles} disabled={busy} />
+          <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" onChange={uploadFiles} disabled={busy} />
           <button onClick={analyze} disabled={!project || project.files.length === 0 || busy}>분석 및 초안 생성</button>
           <button className="secondary" onClick={downloadDocx} disabled={!project?.draft || busy}>Word 다운로드</button>
         </section>

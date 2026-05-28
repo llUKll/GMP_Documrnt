@@ -15,8 +15,8 @@ function App() {
   const [limits, setLimits] = useState({
     supported_extensions: [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"],
     max_files_per_project: 10,
-    max_file_size_bytes: 50 * 1024 * 1024,
-    max_file_size_label: "50MB",
+    max_file_size_bytes: 200 * 1024 * 1024,
+    max_file_size_label: "200MB",
   });
   const [geminiKey, setGeminiKey] = useState("");
   const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash-lite");

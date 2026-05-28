@@ -5,7 +5,7 @@ const STORAGE_PROJECT_PREFIX = "document-insight-project-v2:";
 const DEFAULT_MODEL = "gemini-2.5-flash-lite";
 const MAX_FILES = 10;
 const MAX_REFERENCE_FILES = 1;
-const MAX_FILE_SIZE = 50 * 1024 * 1024;
+const MAX_FILE_SIZE = 200 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = [".docx", ".pdf", ".xlsx", ".txt", ".md", ".csv", ".zip", ".hwpx", ".hwp", ".kt", ".java", ".xml", ".gradle", ".kts", ".json", ".yml", ".yaml"];
 const MAX_EXTRACT_CHARS_PER_FILE = 45000;
 const MAX_GEMINI_INPUT_CHARS = 120000;
@@ -27,7 +27,7 @@ let state = {
     max_files_per_project: MAX_FILES,
     max_reference_files_per_project: MAX_REFERENCE_FILES,
     max_file_size_bytes: MAX_FILE_SIZE,
-    max_file_size_label: "50MB",
+    max_file_size_label: "200MB",
   },
   busy: false,
   busyMessage: "",

@@ -186,21 +186,32 @@ function render() {
           <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" ${state.busy ? "disabled" : ""} />
           <div id="drop-zone" class="drop-zone">파일을 여기에 드래그하거나 파일 선택을 누르세요.</div>
 
-          <button id="analyze" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>2단계 분석 및 상세설계 생성</button>
-          <div class="download-format-row">
-            <select id="download-content" aria-label="다운로드 산출물 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
-              <option value="final">최종 상세설계 문서</option>
-              <option value="analysis">1단계 분석 결과</option>
-              <option value="design">2단계 설계 생성 결과</option>
-              <option value="combined">분석+설계 통합 문서</option>
-            </select>
-            <select id="download-format" aria-label="다운로드 형식 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
-              <option value="docx">Word 문서(.docx)</option>
-              <option value="pptx">PowerPoint(.pptx)</option>
-              <option value="pdf">PDF 문서(.pdf)</option>
-            </select>
-            <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>선택 산출물 다운로드</button>
-            <small>최종 문서뿐 아니라 1단계 분석 결과, 2단계 설계 생성 결과, 통합본을 선택해 DOCX/PPTX/PDF로 다운로드할 수 있습니다.</small>
+          <div class="action-stack">
+            <button id="analyze" class="primary-action" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>2단계 분석 및 상세설계 생성</button>
+
+            <div class="download-card" aria-label="다운로드 설정">
+              <div class="download-card-head">
+                <span class="eyebrow">다운로드</span>
+                <strong>산출물과 파일 형식을 선택하세요</strong>
+              </div>
+              <div class="download-format-row">
+                <label for="download-content" class="label compact-label">다운로드 산출물</label>
+                <select id="download-content" aria-label="다운로드 산출물 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
+                  <option value="final">최종 상세설계 문서</option>
+                  <option value="analysis">1단계 분석 결과</option>
+                  <option value="design">2단계 설계 생성 결과</option>
+                  <option value="combined">분석+설계 통합 문서</option>
+                </select>
+                <label for="download-format" class="label compact-label">다운로드 형식</label>
+                <select id="download-format" aria-label="다운로드 형식 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
+                  <option value="docx">Word 문서(.docx)</option>
+                  <option value="pptx">PowerPoint(.pptx)</option>
+                  <option value="pdf">PDF 문서(.pdf)</option>
+                </select>
+              </div>
+              <button id="download" class="secondary download-action" ${state.project?.draft && !state.busy ? "" : "disabled"}>선택 산출물 다운로드</button>
+              <small>최종 문서뿐 아니라 1단계 분석 결과, 2단계 설계 생성 결과, 통합본을 선택해 DOCX/PPTX/PDF로 다운로드할 수 있습니다.</small>
+            </div>
           </div>
         </section>
 

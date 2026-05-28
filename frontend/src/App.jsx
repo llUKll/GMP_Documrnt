@@ -327,14 +327,23 @@ function App() {
             <span>파일당 용량: {limits.max_file_size_label}</span>
           </div>
           <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" onChange={uploadFiles} disabled={busy} />
-          <button onClick={analyze} disabled={!project || project.files.length === 0 || busy}>분석 및 초안 생성</button>
-          <div className="download-format-row">
-            <select id="download-format-react" disabled={!project?.draft || busy} defaultValue="docx">
-              <option value="docx">Word 문서(.docx)</option>
-              <option value="pptx">PowerPoint(.pptx)</option>
-              <option value="pdf">PDF 문서(.pdf)</option>
-            </select>
-            <button className="secondary" onClick={downloadSelected} disabled={!project?.draft || busy}>선택 형식 다운로드</button>
+          <div className="action-stack">
+            <button className="primary-action" onClick={analyze} disabled={!project || project.files.length === 0 || busy}>분석 및 초안 생성</button>
+            <div className="download-card" aria-label="다운로드 설정">
+              <div className="download-card-head">
+                <span className="eyebrow">다운로드</span>
+                <strong>파일 형식을 선택하세요</strong>
+              </div>
+              <div className="download-format-row">
+                <label className="label compact-label" htmlFor="download-format-react">다운로드 형식</label>
+                <select id="download-format-react" disabled={!project?.draft || busy} defaultValue="docx">
+                  <option value="docx">Word 문서(.docx)</option>
+                  <option value="pptx">PowerPoint(.pptx)</option>
+                  <option value="pdf">PDF 문서(.pdf)</option>
+                </select>
+              </div>
+              <button className="secondary download-action" onClick={downloadSelected} disabled={!project?.draft || busy}>선택 형식 다운로드</button>
+            </div>
           </div>
         </section>
 

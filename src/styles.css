@@ -951,5 +951,20 @@ select {
 .pipeline-step span { color: #e2e8f0; font-size: 13px; font-weight: 700; }
 .pipeline-step small { color: #94a3b8; font-size: 12px; margin-top: 4px; }
 
-.download-format-row { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.download-format-row { display: grid; grid-template-columns: 1fr; gap: 8px; }
 .download-format-row select { width: 100%; }
+.action-stack { display: grid; gap: 14px; margin-top: 14px; }
+.primary-action { width: 100%; min-height: 44px; font-weight: 800; }
+.download-card {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 16px;
+  background: rgba(15, 23, 42, 0.28);
+}
+.download-card-head { display: grid; gap: 3px; }
+.download-card-head strong { color: #e2e8f0; font-size: 14px; }
+.compact-label { margin-top: 0; font-size: 12px; }
+.download-action { width: 100%; min-height: 42px; }
+

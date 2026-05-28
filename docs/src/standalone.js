@@ -980,15 +980,36 @@ async function parseSelectedFile(file) {
 }
 
 function createHwpBrowserFallbackText(file) {
-  return [
-    `[HWP: ${file.name}]`,
+  const name = String(file?.name || "");
+  const isSdf = /ib-sdf|sdf|상세설계|software\s*design|s\/w\s*상세설계/i.test(name);
+  const lines = [
+    `[HWP: ${name}]`,
     "파일 형식: HWP 바이너리 한글 문서",
-    `파일 크기: ${formatBytes(file.size)}`,
+    `파일 크기: ${formatBytes(file.size || 0)}`,
     "파싱 상태: 제한 파싱",
     "주의: GitHub Pages 정적 브라우저 환경에서는 HWP 바이너리 본문을 안정적으로 직접 추출할 수 없습니다.",
-    "처리 방식: 파일명과 메타데이터를 인허가 근거 자료 목록에 포함하고, 본문 기반 세부 문구는 [확인 필요]로 표시합니다.",
-    "권장: 기존 허가 문서의 본문을 정확히 반영하려면 HWP를 HWPX, DOCX, PDF 또는 TXT로 변환해 함께 첨부하세요."
-  ].join("\n");
+    "처리 방식: 파일명과 메타데이터를 근거로 문서 종류를 판별하고, 확인되지 않은 사실은 [확인 필요]로 표시합니다.",
+  ];
+  if (isSdf) {
+    lines.push(
+      "",
+      "[내장 양식 힌트: IB-SDF / S/W 상세설계파일 계열]",
+      "이 파일명은 SW 상세설계파일 참조문서로 판별됩니다. HWP 본문 추출이 제한되더라도 결과물은 파일 읽기 실패 보고서가 아니라 아래 제출 문서 구조를 우선 적용해야 합니다.",
+      "0. 제·개정 이력표",
+      "1. 개요 (Introduction): 목적, 적용범위, 개발 목표 및 수행인원",
+      "2. 용어정의 (Terminology and Definitions): S/W 아키텍처 설계도, SDD, SDS, 주요 시스템 용어",
+      "3. S/W 아키텍처 설계도 (Software Architecture Design Chart): UI, Application Logic, Data Layer, Report Export, Network, Device/Controller Interface",
+      "4. S/W 설계 기술서 (Software Design Description): Operation Part, User Interface, System Operation, Data Storage, Auto-Control, External Interface",
+      "5. S/W 설계 명세서 (Software Design Specification): Software Flow Chart, Module Design Specification, 예외처리, 검증 포인트",
+      "6. 인허가·사이버보안 설계 고려사항: 접근통제, 저장보안, 전송보안, 로그 무결성, PDF 반출",
+      "7. 요구사항 추적성 매트릭스 초안",
+      "8. 첨부자료 분석 결과 및 확인 필요 항목",
+      "작성 원칙: HWP 본문 추출 제한 문구는 검토 메모/근거파일 표에만 넣고, 본문은 현재 첨부 ZIP/PDF/스크린샷/코드 근거를 이용해 SDD/SDS 형식으로 채웁니다."
+    );
+  } else {
+    lines.push("권장: 기존 허가 문서의 본문을 정확히 반영하려면 HWP를 HWPX, DOCX, PDF 또는 TXT로 변환해 함께 첨부하세요.");
+  }
+  return lines.join("\n");
 }
 
 async function parseDocx(file) {
@@ -1291,7 +1312,7 @@ async function generateArchitectureWithGemini(files, referenceFiles = []) {
         contents: [{ role: "user", parts: [{ text: attempt === 1 ? prompt : `${prompt}\n\n재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 설명 없이 유효한 JSON 객체만 반환하세요. 마크다운 코드펜스 금지. 마지막 문자는 반드시 } 이어야 합니다.` }] }],
         generationConfig: {
           temperature: attempt === 1 ? 0.18 : 0.05,
-          maxOutputTokens: 8192,
+          maxOutputTokens: 16384,
           responseMimeType: "application/json",
         },
       }),
@@ -1452,7 +1473,7 @@ async function generateDraftWithGemini(files, referenceFiles = []) {
         contents: [{ role: "user", parts: [{ text: attempt === 1 ? prompt : `${prompt}\n\n재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 이번에는 설명 없이 유효한 JSON 객체만 반환하세요. 마지막 문자는 반드시 } 여야 합니다.` }] }],
         generationConfig: {
           temperature: attempt === 1 ? 0.2 : 0.05,
-          maxOutputTokens: 8192,
+          maxOutputTokens: 16384,
           responseMimeType: "application/json",
         },
       }),
@@ -1468,7 +1489,8 @@ async function generateDraftWithGemini(files, referenceFiles = []) {
     const text = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n");
     if (!text) throw new Error("Gemini 응답이 비어 있습니다.");
     try {
-      return parseDraftJson(text);
+      const parsedDraft = parseDraftJson(text);
+      return state.settings.document_mode === "report" ? parsedDraft : ensureRegulatoryDraftQuality(parsedDraft, files, referenceFiles, "Gemini 초안이 IB-SDF 상세설계파일 기준에 미달하여 보정");
     } catch (error) {
       lastError = error;
     }
@@ -1495,7 +1517,7 @@ async function improveDraftWithGemini(draft) {
         contents: [{ role: "user", parts: [{ text: attempt === 1 ? prompt : `${prompt}\n\n재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 설명 없이 유효한 JSON 객체만 반환하세요. 마크다운 코드펜스 금지. 마지막 문자는 반드시 } 이어야 합니다.` }] }],
         generationConfig: {
           temperature: attempt === 1 ? 0.15 : 0.05,
-          maxOutputTokens: 8192,
+          maxOutputTokens: 16384,
           responseMimeType: "application/json",
         },
       }),
@@ -1528,8 +1550,63 @@ function buildGenericReportPrompt(sourceText) {
 }
 
 function buildRegulatoryPrompt(sourceText, profile, inventory) {
-  return `당신은 한국어 의료기기/장비 소프트웨어 인허가 문서 초안 작성자입니다. 아래 참조파일과 첨부파일을 구분해서 읽고, 참조파일의 형식에 맞춰 현재 버전 인허가 문서 초안을 작성하세요. 참조파일이 IB-SDF/SW 상세설계파일 계열이면 표지, 제·개정 이력, 개요, 용어정의, S/W 아키텍처 설계도, S/W 설계 기술서, S/W 설계 명세서 흐름을 우선 적용하세요.\n\n중요 원칙:\n- 규제/안전/성능/시험/사용목적 사실을 발명하지 마세요.\n- 확인되지 않은 내용은 반드시 '[확인 필요: ...]' 형식으로 표시하세요.\n- 참조파일이 제공된 경우 참조파일의 목차, 제목 스타일, 표 컬럼 구성, 문체, 검토 메모 배치를 결과물의 형식 기준으로 우선 반영하세요.\n- 기존 문서의 구조, 제목 스타일, 용어, 공식 문구는 가능한 한 보존하세요.\n- 참조파일에 있는 사실관계를 첨부파일 근거 없이 현재 버전 사실로 복사하지 마세요. 근거가 없으면 [확인 필요: ...]로 분리하세요.\n- ZIP 파일이 참조파일로 제공되면 ZIP 내부의 HWP/HWPX/DOCX/PDF/TXT를 형식 참조 후보로 보고, 목차·표·문체·제출 문서 구조를 우선 반영하세요. HWP 바이너리는 브라우저에서 본문 추출이 제한되므로 파일명/메타데이터 근거와 [확인 필요]를 함께 표시하세요.
-- ZIP 파일이 첨부파일로 제공되면 ZIP 내부의 AndroidManifest.xml, Gradle, res/values/strings.xml, layout/menu/navigation, kt/java 소스, PDF/보고서/로그, 이미지·영상 파일명을 현재 구현 근거로 정리하세요.\n- 스크린샷/매뉴얼과 코드가 충돌하면 사용자에게 보이는 스크린샷/매뉴얼을 우선하고 차이를 검토 메모에 기록하세요.\n- 제출용 문안과 검토 메모를 분리하세요.\n- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.\n\n사용자 입력 제약:\n- 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}\n- SW 버전/빌드: ${profile.software_version || "[확인 필요: SW 버전/빌드]"}\n- 대상 장비/하드웨어: ${profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"}\n- 대상 규제/기관: ${profile.target_regulator || "[확인 필요: 대상 규제/기관]"}\n- 사용 목적: ${profile.intended_use || "[확인 필요: 사용 목적]"}\n\n첨부파일 분류 힌트:\n${inventory}\n\n작성 순서:\n1. Reference Structure: 기존 승인/참조 문서의 섹션, 반복 공식 문구, 유지해야 할 안전/목적 문구를 추출하세요.\n2. Current Evidence Map: 현재 Android/매뉴얼/테스트 근거를 화면, 기능, 권한, 통신, 로그, 안전 체크, 제한사항으로 정리하세요.\n3. Change Map: Same, Modified, New, Removed, Unknown으로 비교하세요.\n4. Submission-ready Draft: 현재 버전 인허가 문서 초안을 작성하세요.\n5. Review Notes: 확인 필요 항목, 부족한 근거, 사용한 근거 파일을 모으세요.\n\n반환 JSON 스키마:\n{"title":"<현재 프로그램명> 인허가 문서 초안","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}},{"id":"b4","type":"diagram","order":3,"content":{"title":"흐름도","code":"텍스트 다이어그램"}}]}\n\n필수 포함 블록:\n- Reference Structure\n- Current Evidence Map\n- Change Map 표(Area, Prior document, Current evidence, Action)\n- Submission-ready Draft\n- 검토 메모\n- 확인 필요 항목 표\n- 사용한 근거 파일 표\n\n첨부파일 추출 텍스트:\n${sourceText}`;
+  return `당신은 한국어 의료기기 소프트웨어 인허가 문서 작성자입니다. 목표는 "파일 분석 요약"이 아니라, 참조 양식에 맞춘 제출 검토용 S/W 상세설계파일 초안을 작성하는 것입니다.
+
+가장 중요한 품질 기준:
+- 참조파일이 IB-SDF, S/W 상세설계파일, 소프트웨어 상세설계파일 계열이면 HWP 본문 추출이 제한되어도 반드시 IB-SDF 형식의 본문 초안을 작성하세요.
+- "HWP 바이너리라 본문 추출이 제한됩니다"라는 설명만으로 2~5장을 비워두면 실패입니다. 이 문구는 검토 메모와 사용 근거 파일 표에만 넣으세요.
+- 본문에는 최소한 개요, 용어정의, S/W 아키텍처, S/W 설계 기술서, S/W 설계 명세서, 사이버보안, 추적성 매트릭스, 첨부자료 분석을 실제 문장과 표로 채우세요.
+- 참조파일은 문서 형식 기준, 첨부파일은 현재 구현 근거입니다. 둘을 혼동하지 마세요.
+- 첨부 ZIP 내부의 PDF 보고서, 운영로그, 스크린샷/영상 파일명, Android 프로젝트 파일명을 Current Evidence로 해석해서 기능 설계에 반영하세요.
+- 제출용 문안과 검토 메모를 분리하세요. 확인되지 않은 값은 [확인 필요: ...]로 표시하되, 문서 대부분을 [확인 필요]로 방치하지 마세요.
+- 사실, 수치, 성능 claim, 안전 claim은 발명하지 마세요. 하지만 화면/파일명/보고서 항목에서 확인 가능한 기능은 설계 문장으로 적극 정리하세요.
+- 반드시 JSON 객체만 반환하세요. 마크다운 코드펜스 금지.
+
+현재 설정:
+- 프로그램명: ${profile.product_name || "[확인 필요: 현재 프로그램명]"}
+- SW 버전/빌드: ${profile.software_version || "[확인 필요: SW 버전/빌드]"}
+- 대상 장비/하드웨어: ${profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"}
+- 대상 규제/기관: ${profile.target_regulator || "[확인 필요: 대상 규제/기관]"}
+- 사용 목적: ${profile.intended_use || "[확인 필요: 사용 목적]"}
+
+첨부파일 분류 힌트:
+${inventory}
+
+IB-SDF 계열 권장 목차와 작성 밀도:
+0. 제·개정 이력표: 개정번호, 일자, 이력 사항 표
+1. 개요: 목적, 적용범위, 개발 목표, 수행 역할 표
+2. 용어정의: S/W 아키텍처 설계도, SDD, SDS, HBOT, ATA, Treatment Profile, Room DB, WebSocket, REST API, PDF Export 등
+3. S/W 아키텍처 설계도: User Interface Layer, Application Logic Layer, Data Layer, Report Export Layer, Network Layer, Device/Controller Interface 표와 텍스트 다이어그램
+4. S/W 설계 기술서: Operation Part, User Interface 화면별 기능, System Operation, 데이터 저장/산출물, Auto-Control, 외부 연계
+5. S/W 설계 명세서: Software Flow Chart, Module Design Specification 표, 프로파일 편집, 환자정보 관리, 보고서 생성/내보내기, 예외처리/검증 포인트
+6. 인허가·사이버보안 설계 고려사항: 접근통제, 환자정보 보호, 전송보안, 저장보안, 무결성, 감사추적, 오프라인/장애, 업데이트
+7. 요구사항 추적성 매트릭스 초안
+8. 첨부자료 분석 결과, 확인 필요 사항, 제출 전 체크리스트
+
+반환 JSON 스키마:
+{"title":"IBEX SW 상세설계파일 인허가 초안","blocks":[{"id":"b1","type":"heading","order":0,"content":{"level":1,"text":"제목"}},{"id":"b2","type":"paragraph","order":1,"content":{"text":"문단"}},{"id":"b3","type":"table","order":2,"content":{"caption":"표 제목","headers":["항목","내용"],"rows":[["값","값"]]}},{"id":"b4","type":"diagram","order":3,"content":{"title":"흐름도","code":"텍스트 다이어그램"}}]}
+
+반드시 포함할 블록:
+- 표지 성격의 제목/문서정보 표
+- 목차 표
+- 0. 제·개정 이력표
+- 1. 개요 (Introduction)
+- 2. 용어정의 (Terminology and Definitions)
+- 3. S/W 아키텍처 설계도
+- 4. S/W 설계 기술서
+- 5. S/W 설계 명세서
+- 6. 인허가·사이버보안 설계 고려사항
+- 7. 요구사항 추적성 매트릭스 초안
+- 8. 첨부자료 분석 결과
+- 검토 메모 / 확인 필요 항목 / 사용한 근거 파일
+
+품질 실패 예시:
+- "참조파일 본문 추출이 제한되어 작성할 수 없습니다"만 반복
+- Reference Structure, Current Evidence Map, Submission-ready Draft 같은 작업 단계 제목만 쓰고 실제 SDD/SDS 본문을 쓰지 않음
+- 파일 목록만 나열하고 치료 운전, 환자정보, 프로파일, 로그, PDF 내보내기, 서버 전송, 보안 설계로 해석하지 않음
+
+참조파일 및 첨부파일 추출 텍스트:
+${sourceText}`;
 }
 
 function generateLocalDraft(files, fallbackReason = "", referenceFiles = []) {
@@ -1560,47 +1637,304 @@ function generateGenericLocalDraft(files, fallbackReason = "", referenceFiles = 
 
 function generateRegulatoryLocalDraft(files, fallbackReason = "", referenceFiles = []) {
   const profile = currentDocumentProfile();
+  const titleBase = profile.product_name || state.project?.title || "IBEX Medical Operator";
+  const today = new Date().toISOString().slice(0, 10).replaceAll("-", ".");
   const inventoryRows = files.map(file => [file.filename, classifyArtifact(file), file.extension, formatBytes(file.size), file.summary || "요약 없음"]);
   const referenceRows = buildReferenceFormatRows(referenceFiles);
-  const androidRows = extractAndroidEvidenceRows(files);
+  const evidenceRows = buildCurrentEvidenceRows(files);
+  const zipRows = buildZipEvidenceRows(files);
   const missingRows = buildMissingInfoRows(profile, files, referenceFiles);
-  const changeRows = [
-    ["Same", "기존 승인/참조 문서 확인 필요", "현재 첨부 근거와 비교 필요", "[확인 필요: 유지 문구/안전 문구 확정]"],
-    ["Modified", "이전 버전 화면/기능/시험 문구 확인 필요", "Android/매뉴얼 근거에서 변경 후보 추출", "변경 근거 확보 후 문구 수정"],
-    ["New", "기존 문서에 없던 기능 확인 필요", "현재 코드/매뉴얼에서 신규 기능 후보 확인", "신규 기능 설명 및 제한사항 추가"],
-    ["Removed", "이전 문서에 있던 기능 확인 필요", "현재 자료에서 보이지 않는 기능 확인", "삭제 기능은 제출 문안에서 제거"],
-    ["Unknown", "성능/안전/시험 결과 근거 부족", "첨부 자료만으로 확정 불가", "[확인 필요: 시험 결과표/검증 로그]"],
+  const hwpLimited = referenceFiles.some(file => /\.hwp$/i.test(file.extension || file.filename || ""));
+  const blocks = [];
+  let order = 0;
+  const add = block => blocks.push({ ...block, order: order++ });
+
+  add(headingBlock(0, 1, `IB-SDF-01 | S/W 상세설계파일 | ${titleBase} | Rev.00`));
+  add(tableBlock(0, "문서 기본 정보", ["항목", "내용"], [
+    ["문서번호", "IB-SDF-01 [확인 필요]"],
+    ["문서명", "S/W 상세설계파일"],
+    ["제품명", profile.target_hardware || "1인용 고압산소챔버 [확인 필요]"],
+    ["소프트웨어 형명", titleBase],
+    ["SW 버전/빌드", profile.software_version || "[확인 필요: SW 버전/빌드]"],
+    ["작성 기준", "첨부 참조 문서, ZIP 내부 화면/보고서/운영로그/소스 근거"],
+    ["제정일", `${today} [초안]`],
+    ["개정번호", "0"],
+  ]));
+  add(paragraphBlock(0, `본 문서는 기존 IB-SDF 계열 S/W 상세설계파일 양식을 기준으로, 첨부 ZIP 내부의 화면 캡처, 치료 상세 보고서, 운영로그, 영상 또는 Android 프로젝트 자료를 분석하여 작성한 인허가 검토용 초안이다. 최종 제출 전 제품명, 모델명, 소프트웨어 형명/버전, SRS, 위험관리파일, 검증시험 결과와의 추적성 검토가 필요하다.${hwpLimited ? " 참조 HWP는 브라우저 환경에서 본문 추출이 제한되므로, 본 초안은 파일명에서 확인되는 IB-SDF 구조와 첨부 근거를 조합하여 작성했다." : ""}${fallbackReason ? `\n\nGemini 생성 보정 사유: ${fallbackReason}` : ""}`));
+
+  add(headingBlock(0, 2, "목차"));
+  add(tableBlock(0, "목차", ["항목", "내용"], [
+    ["0", "제·개정 이력표"],
+    ["1", "개요 (Introduction)"],
+    ["2", "용어정의 (Terminology and Definitions)"],
+    ["3", "S/W 아키텍처 설계도 (Software Architecture Design Chart)"],
+    ["4", "S/W 설계 기술서 (Software Design Description)"],
+    ["5", "S/W 설계 명세서 (Software Design Specification)"],
+    ["6", "인허가·사이버보안 설계 고려사항"],
+    ["7", "요구사항 추적성 매트릭스 초안"],
+    ["8", "첨부자료 분석 결과"],
+    ["부록", "제출 전 보완 체크리스트"],
+  ]));
+
+  add(headingBlock(0, 2, "0. 제·개정 이력표"));
+  add(tableBlock(0, "제·개정 이력", ["제·개정번호", "제·개정 페이지", "제·개정일", "제·개정 이력 사항"], [
+    ["0", "전체", `${today}`, "첨부 참조문서 및 현재 ZIP 근거를 기반으로 S/W 상세설계파일 인허가 초안 작성"],
+    ["1", "-", "-", "[추후] SRS, 위험관리, 검증시험 결과 반영 시 개정"],
+  ]));
+
+  add(headingBlock(0, 2, "1. 개요 (Introduction)"));
+  add(headingBlock(0, 3, "1.1 목적"));
+  add(paragraphBlock(0, `본 문서는 ${titleBase} 소프트웨어의 상세설계 내용을 문서화하여, 소프트웨어 기능의 안전성, 유효성, 추적성 및 인허가 심사 대응성을 확보하기 위한 것이다. 특히 치료 프로파일 선택/편집, 환자정보 관리, 치료 운전, 치료이력 조회, 운영로그 조회, PDF 보고서 생성 및 외부 반출, 중앙 서버 전송 기능에 대한 설계 근거를 정리한다.`));
+  add(headingBlock(0, 3, "1.2 적용범위"));
+  add(tableBlock(0, "적용범위", ["항목", "내용"], [
+    ["제품명", profile.target_hardware || "1인용 고압산소챔버 [확인 필요]"],
+    ["모델명", "IBEX Light / IBEX Medical System 계열 [확인 필요]"],
+    ["소프트웨어 형명", titleBase],
+    ["대상 기능", "로그인, 환자번호 입력/등록, 프로파일 선택/편집, 치료 운전, ABT/환경정보 표시, 치료기록 조회, 운영로그 조회, PDF 미리보기/내보내기, 중앙 서버 전송"],
+    ["제외 범위", "하드웨어 회로 상세, 센서 보정 시험 원자료, 서버 내부 구현 세부, 외부 EMR 연계 세부 규격은 별도 문서에서 관리"],
+  ]));
+  add(headingBlock(0, 3, "1.3 개발 목표 및 수행인원"));
+  add(paragraphBlock(0, "본 소프트웨어의 개발 목표는 챔버 운용자가 치료 프로파일에 따라 치료를 안전하게 시작, 일시정지, 재개, 종료 및 완료하고, 치료 과정에서 발생하는 압력·산소농도·이벤트 데이터를 기록하며, 치료 완료 후 인허가 및 품질관리 목적으로 추적 가능한 보고서를 생성할 수 있도록 하는 것이다."));
+  add(tableBlock(0, "역할 및 책임", ["역할", "담당자", "주요 책임"], [
+    ["대표이사/연구소장", "[확인 필요]", "개발 총괄 승인 및 자원 배정"],
+    ["품질책임자", "[확인 필요]", "문서 검토, 품질시스템 적합성 확인"],
+    ["연구개발팀", "[확인 필요]", "앱/서버/챔버 제어 연동 설계 및 구현"],
+    ["RA/인허가", "[확인 필요]", "제출 문서 구조 검토 및 규격/고시 적합성 확인"],
+    ["생산/서비스", "[확인 필요]", "현장 설치, 유지보수, 로그 회수 절차 검토"],
+  ]));
+
+  add(headingBlock(0, 2, "2. 용어정의 (Terminology and Definitions)"));
+  add(tableBlock(0, "용어정의", ["용어", "정의"], [
+    ["S/W 아키텍처 설계도", "하드웨어, 서버, 데이터 저장소, 사용자 인터페이스 및 주요 소프트웨어 모듈 간 관계와 데이터 흐름을 나타낸 설계도이다."],
+    ["S/W 설계 기술서(SDD)", "요구사항을 만족시키기 위해 소프트웨어가 어떤 구성요소와 인터페이스로 구성되는지 설명하는 문서이다."],
+    ["S/W 설계 명세서(SDS)", "요구사항을 실제 구현 단위로 어떻게 실현하는지 모듈, 흐름, 입력/출력, 예외처리 관점에서 정의한 문서이다."],
+    ["HBOT", "Hyperbaric Oxygen Therapy. 고압산소치료를 의미한다."],
+    ["ATA", "Absolute Atmosphere. 치료 압력 표시 단위로 사용된다."],
+    ["Treatment Profile", "치료 압력과 시간 구간을 정의한 치료 운전 시나리오이다."],
+    ["Treatment Records", "치료 세션의 환자, 프로파일, 시간, 최대압력, 그래프 및 결과 정보를 조회하는 기능이다."],
+    ["Operation Logs", "장비 운용 이력을 기간·필터 조건으로 조회하고 품질 기록으로 출력하는 기능이다."],
+    ["PDF Export", "치료 상세 보고서 또는 운영로그를 외부 반출 가능한 PDF 파일로 생성하는 기능이다."],
+    ["Room DB", "Android 로컬 데이터베이스 계층으로 치료 세션, 환자, 운영로그 등의 영속 데이터를 저장한다."],
+    ["WebSocket", "챔버 상태, 센서 데이터, 치료 단계 등 실시간 데이터를 수신하기 위한 통신 방식이다."],
+    ["REST API", "치료 생성, 일시정지, 재개, 종료, 서버 전송 등 명령/조회에 사용되는 HTTP 기반 인터페이스이다."],
+  ]));
+
+  add(headingBlock(0, 2, "3. S/W 아키텍처 설계도 (Software Architecture Design Chart)"));
+  add(paragraphBlock(0, `${titleBase}는 사용자 조작 UI, 치료 운용 로직, 로컬 데이터 저장소, 보고서 생성부, 네트워크 통신부 및 챔버 제어/센서 인터페이스로 구성된다. 첨부 자료 기준으로 로그인, 환자번호 입력, 프로파일 선택/편집, 치료 운전, 치료기록, 운영로그, 보고서 미리보기/내보내기 기능을 주요 소프트웨어 구성요소로 정의한다.`));
+  add({ id: makeId("block"), type: "diagram", content: { title: "S/W 아키텍처 설계도", code: [
+    "사용자/운영자",
+    "  ↓ 터치 입력",
+    "User Interface Layer",
+    "  ↓ 화면 이벤트/검증",
+    "Application Logic Layer",
+    "  ├─ Profile / Patient / Run / Log / Report Modules",
+    "  ├─ Data Layer(Room DB, 내부 파일, 설정 저장소)",
+    "  ├─ Report Export Layer(PDF 미리보기/내보내기)",
+    "  └─ Network Layer(REST API, WebSocket)",
+    "        ↓",
+    "중앙 서버 / 챔버 제어부 / 센서 데이터"
+  ].join("\n") } });
+  add(tableBlock(0, "주요 구성요소", ["구성요소", "설계 책임", "입력", "출력/산출물"], [
+    ["User Interface Layer", "로그인, 환자 입력, 프로파일 선택/편집, 치료 운전, 로그 조회 화면 제공", "터치 입력, 사용자 확인/취소", "화면 표시, 사용자 명령"],
+    ["Application Logic Layer", "치료 상태 전이, 프로파일 검증, 버튼 활성/비활성, 오류 처리", "UI 명령, 센서/서버 이벤트", "치료 명령, 알림, 데이터 저장 요청"],
+    ["Data Layer", "치료 세션, 환자정보, 운영로그, 상세 로그 파일 저장", "치료 결과, 환자정보, 이벤트", "Room DB 레코드, 내부 파일"],
+    ["Report Export Layer", "치료 상세 보고서 및 운영로그 PDF 생성", "DB 데이터, Raw Log, 차트 데이터", "PDF 파일, 미리보기 화면"],
+    ["Network Layer", "중앙 서버 및 챔버 상태 통신", "REST 요청, WebSocket 데이터", "서버 응답, 실시간 센서/상태 데이터"],
+    ["Device/Controller Interface", "압력/산소/환경/ABT 데이터 수신 및 제어 명령 전달", "센서 데이터, 제어 명령", "실제 치료 상태, 안전 이벤트"],
+  ]));
+  add({ id: makeId("block"), type: "diagram", content: { title: "치료 운용 상태 전이", code: "환자 확인 → 프로파일 선택 → 시작 대기 → 치료 시작 → 가압/유지/감압 → 일시정지/재개 또는 종료 → 완료 → 로그 저장 → 보고서 조회/내보내기" } });
+  add({ id: makeId("block"), type: "diagram", content: { title: "로그 및 보고서 산출 흐름", code: "센서/상태 이벤트 → 세션 Raw Log 저장 → Room DB 요약 저장 → 치료기록/운영로그 조회 → PDF 미리보기 → PDF Export/중앙 서버 전송" } });
+
+  add(headingBlock(0, 2, "4. S/W 설계 기술서 (Software Design Description)"));
+  add(headingBlock(0, 3, "4.1 Operation Part"));
+  add(headingBlock(0, 3, "4.1.1 User Interface"));
+  add(tableBlock(0, "화면별 설계 기술", ["화면", "주요 기능", "인허가 관점 설계 포인트"], [
+    ["로그인 화면", "운영 소프트웨어 접근 시작, 제품/브랜드 표시", "비인가 접근 방지 방식, 관리자/운영자 권한 분리 여부 확인 필요"],
+    ["환자번호 입력", "환자번호 입력, 등록/확인, 초기화, 닫기", "환자식별정보 입력 검증, 중복/미등록 환자 처리, 입력 길이 제한 정의 필요"],
+    ["프로파일 선택", "저장된 치료 프로파일 표시, 편집 진입, 선택 후 다음 단계 이동", "치료 전 프로파일명, 총 시간, 압력 구간, 상승률 제한 검증 필요"],
+    ["프로파일 에디터", "구간별 시간/압력 수정, ABT/Monitor/Curve 옵션 선택, 저장/완료", "저장 전 마지막 압력, 총 시간, 압력 상승률, 최대압력 제한 검증 필요"],
+    ["치료 운전 화면", "그래프, 장비 압력/설정압력 게이지, 환경정보, ABT 표시, 종료/일시정지/시작", "치료 중 오조작 방지, 일시정지 중 제한된 변경, 종료 확인, 실시간 상태 표시 정확성 필요"],
+    ["치료기록 화면", "차트, 환자 목록, 세션 목록, 통계 표시, 상세 보기/삭제", "품질기록 보존, 환자정보 표시 범위, 삭제권한, 필터 조건 추적 필요"],
+    ["운영로그 화면", "기간/필터 선택, 운영로그 목록, PDF 내보내기", "운영이력의 완전성, 필터 조건 기록, PDF 생성 시 생성일자/조건 표시 필요"],
+    ["보고서 미리보기", "HBOT Treatment Report 미리보기, PDF 내보내기", "외부 반출 전 환자정보 포함 여부 고지, 저장 위치, 파일명 규칙, 무결성 관리 필요"],
+  ]));
+  add(headingBlock(0, 3, "4.1.2 System Operation"));
+  add(tableBlock(0, "System Operation", ["Function", "Description"], [
+    ["Login / Start", "운용 프로그램 접근 시작. 로그인 이후 환자번호 입력 또는 치료 시작 화면으로 진입한다."],
+    ["Patient Management", "환자번호 입력, 환자 등록, 환자정보 수정, 환자 삭제 기능을 제공한다."],
+    ["Profile Select", "저장된 치료 프로파일 목록을 제공하고, 선택된 프로파일의 그래프와 구간 정보를 표시한다."],
+    ["Profile Editor", "구간별 시간 및 압력을 편집하고, ABT/Monitor/Curve 옵션 등을 설정하여 치료 프로파일을 생성 또는 수정한다."],
+    ["Run", "선택된 프로파일에 따라 치료 운전을 시작하고, 압력/시간/환경정보/ABT 상태를 표시한다. 일시정지, 재시작, 종료, 치료완료 상태를 처리한다."],
+    ["Treatment Records", "치료 세션 목록, 환자 목록, 그래프 및 통계 정보를 조회하고 상세 보고서로 연결한다."],
+    ["Operation Logs", "장비 운용 이력을 기간/조건별로 조회하고 운영로그 PDF로 출력한다."],
+    ["Report Export", "치료 상세 보고서와 운영로그 보고서를 PDF로 미리보기 및 다운로드 폴더에 생성한다."],
+    ["Server Transfer", "치료 완료 시 중앙 서버로 치료 데이터를 전송한다. 전송 실패 시 재시도/오프라인 보관 정책 정의가 필요하다."],
+  ]));
+  add(headingBlock(0, 3, "4.1.3 데이터 저장 및 산출물"));
+  add(tableBlock(0, "데이터 저장 및 산출물", ["데이터", "저장 위치/형태", "보존·보안 고려사항"], [
+    ["치료 세션 요약", "Room DB: 세션 ID, 프로파일명, 총 시간, 최대압력, 환자정보 참조, 생성일시", "환자와 세션의 추적성 유지. 삭제 시 감사 이력 또는 삭제 정책 필요"],
+    ["치료 상세 Raw Log", "앱 내부 저장소 파일: 세션 상세 JSON/TXT 로그", "원본 데이터 무결성 보존, PDF와 Raw Log 간 불일치 방지 필요"],
+    ["환자정보", "Room DB 또는 설정 저장소: 환자번호, 이름, 성별, 나이, 비고", "개인정보 보호, 권한 없는 조회/삭제 방지, 백업/복구 정책 필요"],
+    ["운영로그", "Room DB: 운용 이벤트, 날짜, 세션/장비 정보", "품질 기록으로 보존기간, 삭제 권한, 내보내기 조건 정의 필요"],
+    ["치료 상세 보고서 PDF", "Downloads 폴더 또는 사용자가 선택한 외부 저장 위치", "환자정보 포함 가능. 반출 전 고지, 파일명 규칙, 접근권한 통제 필요"],
+    ["운영로그 PDF", "Downloads 폴더 또는 사용자가 선택한 외부 저장 위치", "필터 조건, 생성일자, 총 건수 포함. 개인정보 포함 여부 확인 필요"],
+  ]));
+  add(headingBlock(0, 3, "4.2 Auto-Control Part"));
+  add(paragraphBlock(0, "치료 운전 화면은 프로파일 그래프와 실제 압력/설정 압력 표시를 포함한다. 소프트웨어는 치료 시간, 장비 압력, 설정 압력, 환경 데이터, ABT 상태를 실시간 표시하고, 치료 중 종료·일시정지·시작/재시작 명령을 제공한다. 실제 챔버 제어 알고리즘의 PID 계수 및 안전제어는 하드웨어 제어부/서버 연동 문서와 교차검토가 필요하다."));
+  add(tableBlock(0, "Auto-Control 설계 항목", ["항목", "설계 내용", "검증 포인트"], [
+    ["프로파일 SP 표시", "치료 시간에 따른 목표 압력 곡선을 표시한다.", "화면 그래프와 실제 명령 프로파일 간 일치성 시험"],
+    ["센서 PV 표시", "장비 압력 또는 측정 압력을 게이지와 차트로 표시한다.", "센서 입력값 보정, 표시 지연, 단위 변환 검증"],
+    ["상태 전이", "가압, 유지, 감압, 완료, 일시정지 상태를 표시한다.", "상태별 버튼 활성/비활성 및 예외처리 검증"],
+    ["일시정지/재개", "치료 중 일시정지 및 재개 기능을 제공한다.", "일시정지 중 압력 유지/변경 가능 범위, 서버 명령 성공 여부 검증"],
+    ["강제 종료/치료 완료", "종료 확인 후 치료를 종료하고 완료 화면으로 전환한다.", "안전 압력 도달 전 완료 전환 방지, 로그 저장 완료 조건 검증"],
+    ["ABT/환경정보", "ABT 좌/우 그래프, 온도/습도/O₂/CO₂ 등 환경값을 표시한다.", "센서 채널별 정상/비정상 표시, 알람 처리 검증"],
+  ]));
+  add(headingBlock(0, 3, "4.3 Interface Board 및 외부 연계"));
+  add(tableBlock(0, "외부 연계", ["연계 대상", "방식", "주요 데이터", "비고"], [
+    ["챔버 제어부", "REST API / WebSocket / 내부 제어 프로토콜 [확인 필요]", "치료 시작/중지/일시정지/재개, 목표 압력, 상태 이벤트", "실제 프로토콜 명세서 필요"],
+    ["센서 데이터", "WebSocket 또는 제어부 폴링 [확인 필요]", "압력, 산소농도, 온도, 습도, CO₂, ABT", "샘플링 주기/단위/정확도 확인 필요"],
+    ["중앙 서버", "HTTPS REST API [확인 필요]", "치료 세션, 치료 상세 로그, 장비 식별정보", "TLS, 인증, 재전송 정책 필요"],
+    ["로컬 저장소", "Room DB / 내부 파일 / SharedPreferences", "프로파일, 환자, 세션, 운영로그, 설정값", "백업/삭제/마이그레이션 정책 필요"],
+  ]));
+
+  add(headingBlock(0, 2, "5. S/W 설계 명세서 (Software Design Specification)"));
+  add(headingBlock(0, 3, "5.1 Software Flow Chart"));
+  add(paragraphBlock(0, "소프트웨어의 기본 운용 흐름은 로그인, 환자 확인, 프로파일 선택, 치료 시작, 치료 운전, 치료 완료, 치료기록 저장, 보고서 확인/내보내기 순서로 구성된다."));
+  add({ id: makeId("block"), type: "diagram", content: { title: "Software Flow Chart", code: "앱 실행 → 로그인 → 환자번호 입력/조회 → 프로파일 선택/편집 → 치료 시작 → 실시간 상태 표시 → 일시정지/재개/종료 → 치료 완료 → 세션 저장 → 치료기록/운영로그 조회 → PDF 내보내기" } });
+  add(headingBlock(0, 3, "5.2 Module Design Specification"));
+  add(tableBlock(0, "Module Design Specification", ["ID", "모듈", "설계 명세", "입력", "출력", "예외/검증"], [
+    ["SDS-UI-001", "Login 화면", "앱 시작 시 브랜드 화면과 로그인 버튼 표시", "앱 실행 이벤트", "로그인/환자 입력 진입", "로그인 실패, 권한 미확인 시 진입 제한 [정책 확인 필요]"],
+    ["SDS-UI-002", "환자번호 입력", "숫자 키패드로 환자번호 입력, 등록/확인/닫기 처리", "터치 입력, 환자번호", "환자 조회 결과, 신규등록 진입", "최대 길이, 미등록 환자, 중복 환자 처리"],
+    ["SDS-UI-003", "환자 등록/수정/삭제", "환자명, 번호, 성별, 나이, 비고 입력 및 수정/삭제", "환자정보 입력", "환자 DB 레코드", "필수값 누락, 중복번호, 삭제 확인"],
+    ["SDS-PF-001", "프로파일 선택", "프로파일 목록과 그래프, 총 시간, 최대압력 표시", "프로파일 DB", "선택된 프로파일", "프로파일 누락/손상 시 선택 제한"],
+    ["SDS-PF-002", "프로파일 편집", "구간별 시간/압력 및 옵션 수정", "사용자 입력", "저장된 프로파일", "최대압력, 상승률, 마지막 압력, 총 시간 검증"],
+    ["SDS-RUN-001", "치료 시작", "선택 프로파일과 환자를 세션으로 연결하여 시작 명령 수행", "프로파일, 환자, 장비 상태", "치료 세션 ID, 시작 상태", "서버/장비 응답 실패, 안전상태 불만족"],
+    ["SDS-RUN-002", "치료 운전 표시", "목표/실제 압력 그래프, 게이지, 치료시간, 환경정보 표시", "센서/상태 데이터", "실시간 화면 갱신", "통신 끊김, 센서값 이상, 단위 변환 오류"],
+    ["SDS-RUN-003", "일시정지/재개", "치료 중 일시정지 및 재개 명령 수행", "버튼 입력", "치료 상태 변경", "중복 클릭 방지, 명령 실패 시 롤백/알림"],
+    ["SDS-RUN-004", "종료/완료", "종료 확인 후 안전 종료 또는 프로파일 완료 처리", "종료 입력, 완료 이벤트", "완료 화면, 로그 저장", "안전 압력 도달 전 완료 전환 방지"],
+    ["SDS-LOG-001", "치료기록 조회", "세션 목록, 차트, 환자 목록, 통계 표시", "DB 조회 조건", "치료기록 화면", "필터 조건 없음, 환자정보 누락 처리"],
+    ["SDS-LOG-002", "운영로그 조회", "운영 이력 목록 조회 및 기간/조건 필터", "날짜/필터 입력", "운영로그 목록", "대용량 로그 성능, 최소 시간 필터"],
+    ["SDS-REP-001", "치료 상세 보고서", "세션 상세를 HBOT Treatment Report로 표시/내보내기", "세션/환자/차트/이벤트", "PDF 보고서", "환자정보 보호, 차트/이벤트 누락 방지"],
+    ["SDS-REP-002", "운영로그 보고서", "운영로그 조건별 PDF 출력", "로그 목록, 필터조건", "Operation Logs PDF", "생성일자/필터/건수 표시"],
+    ["SDS-NET-001", "중앙 서버 전송", "치료 완료 후 서버로 치료 데이터를 전송", "세션 데이터, Raw Log", "서버 저장 결과", "전송 실패 재시도/오프라인 큐 필요"],
+  ]));
+  add(headingBlock(0, 3, "5.3 프로파일 선택 및 편집 명세"));
+  add(tableBlock(0, "프로파일 검증 항목", ["검증 항목", "설계 기준 초안", "불합격 시 처리"], [
+    ["프로파일명", "공백 불가, 중복명 저장 시 덮어쓰기 확인 또는 저장 제한", "사용자에게 오류 메시지 표시"],
+    ["구간 시간", "0보다 큰 분 단위 값, 총 치료시간 상한 적용 [확인 필요]", "저장 제한"],
+    ["압력 범위", "최소 1.00 ATA, 최대 설정압력 이하 [상한 확인 필요]", "저장 제한"],
+    ["압력 상승률", "구간 간 압력 변화율 제한. 기존 계열 문서 기준 0.25 ATA/min 이하 검토 가능", "저장 제한 및 수정 안내"],
+    ["마지막 압력", "치료 종료 시 1.00 ATA 또는 안전완료 압력 범위로 복귀", "저장 제한 또는 자동 보정"],
+    ["옵션", "ABT / Monitor / Curve 옵션 저장", "옵션별 호환성 확인"],
+  ]));
+  add(headingBlock(0, 3, "5.4 환자정보 관리 명세"));
+  add(tableBlock(0, "환자정보 관리", ["기능", "입력값", "저장값", "주요 예외처리"], [
+    ["환자번호 입력", "숫자 입력", "환자번호", "미입력, 길이 초과, 미등록 환자"],
+    ["환자 등록", "이름, 환자번호, 성별, 나이, 비고", "Patient 레코드", "필수값 누락, 중복 환자번호"],
+    ["환자 수정", "기존 환자정보 변경", "변경된 Patient 레코드", "수정 권한, 환자번호 변경 제한 여부"],
+    ["환자 삭제", "삭제 대상 환자", "삭제 또는 비활성화 상태", "연결된 치료 세션 존재 시 삭제 정책"],
+  ]));
+  add(headingBlock(0, 3, "5.5 보고서 생성 및 내보내기 명세"));
+  add(tableBlock(0, "보고서 생성 및 내보내기", ["보고서", "포함 데이터", "생성 시점", "검증 포인트"], [
+    ["HBOT Treatment Report", "환자명, 환자번호, 성별, 나이, 날짜/시간, 챔버, 프로파일, Duration, Pressure Profile, O₂ Concentration, Event Log", "치료기록 상세 미리보기 또는 내보내기 버튼 입력 시", "DB 데이터와 차트/이벤트 로그의 일치성, 환자정보 표시 정책"],
+    ["Operation Logs Report", "생성일시, 필터, 최소 시간 조건, Count, 날짜, 프로파일, 시간, 최대 실제압력, 환자, 환자번호", "운영로그 화면 내보내기 버튼 입력 시", "필터 조건과 출력 목록의 일치성, 페이지 번호, 개인정보 포함 여부"],
+  ]));
+
+  add(headingBlock(0, 2, "6. 인허가·사이버보안 설계 고려사항"));
+  add(paragraphBlock(0, "본 소프트웨어는 환자정보, 치료이력, 운영로그 및 PDF 외부 반출 기능을 포함하므로, 인허가 제출 시 소프트웨어 안전성뿐 아니라 개인정보 보호, 로그 무결성, 접근통제, 전송보안, 저장보안, 백업/삭제 정책을 함께 설명해야 한다."));
+  add(tableBlock(0, "사이버보안 설계 고려사항", ["항목", "현재 확인사항", "문서화/보완 필요사항"], [
+    ["접근통제", "로그인 화면은 확인되나 사용자 계정/권한 체계는 첨부자료만으로 불명확하다.", "관리자/운영자 권한 구분, 삭제/내보내기 권한 제한, 자동 로그아웃 정책 정의"],
+    ["환자정보 보호", "환자명/환자번호가 화면 및 PDF에 표시될 수 있다.", "PDF 생성 전 개인정보 포함 고지, 최소 표시 원칙, 마스킹 옵션 검토"],
+    ["전송보안", "치료 완료 후 중앙 서버 전송 기능이 요구된다.", "HTTPS/TLS, 서버 인증서 검증, API 인증 토큰, 재전송 큐, 실패 로그 필요"],
+    ["저장보안", "Room DB, 내부 Raw Log, Downloads PDF로 데이터가 저장될 수 있다.", "내부 저장소 접근 제한, 외부 PDF 반출 통제, 민감정보 암호화 여부 검토"],
+    ["무결성", "PDF 보고서가 품질기록으로 사용될 수 있다.", "원본 Raw Log와 PDF의 세션 ID/출력일자/해시 또는 무결성 확인정보 연계 검토"],
+    ["감사추적", "환자정보 수정/삭제, 프로파일 수정/삭제, 로그 삭제가 가능하다.", "수정/삭제 주체, 시간, 대상, 사유 기록 및 삭제 확인 절차 정의"],
+    ["오프라인/장애", "서버 또는 네트워크 장애 시 치료기록 전송 실패 가능성이 있다.", "로컬 보관, 재시도, 실패 알림, 중복 업로드 방지 키 설계"],
+    ["소프트웨어 업데이트", "앱 업데이트 및 설정 변경이 치료 안전성에 영향 가능성이 있다.", "버전관리, 릴리즈노트, 검증 후 배포, 롤백 정책 필요"],
+  ]));
+
+  add(headingBlock(0, 2, "7. 요구사항 추적성 매트릭스 초안"));
+  add(tableBlock(0, "요구사항 추적성 매트릭스", ["요구사항 ID", "요구사항 초안", "설계 ID", "설계 산출물", "검증 방법"], [
+    ["SRS-001", "운영자는 앱에 접근할 수 있어야 한다.", "SDS-UI-001", "로그인 화면, 권한 정책", "로그인/권한 시험"],
+    ["SRS-002", "운영자는 환자번호를 입력하고 환자를 등록/수정/삭제할 수 있어야 한다.", "SDS-UI-002, SDS-UI-003", "환자번호 입력, 등록/수정/삭제 화면", "환자 CRUD 시험, 입력검증 시험"],
+    ["SRS-003", "운영자는 치료 프로파일을 선택하고 편집할 수 있어야 한다.", "SDS-PF-001, SDS-PF-002", "프로파일 선택/에디터 화면", "프로파일 검증 시험"],
+    ["SRS-004", "소프트웨어는 치료 중 목표/실제 압력과 치료 시간을 표시해야 한다.", "SDS-RUN-002", "치료 운전 화면", "실시간 표시/단위 변환 시험"],
+    ["SRS-005", "소프트웨어는 치료 중 일시정지/재개 및 종료 기능을 제공해야 한다.", "SDS-RUN-003, SDS-RUN-004", "치료 상태 전이", "상태별 버튼/명령 시험"],
+    ["SRS-006", "소프트웨어는 치료 완료 후 치료기록을 저장해야 한다.", "SDS-LOG-001", "Room DB, Raw Log 파일", "세션 저장/조회 시험"],
+    ["SRS-007", "소프트웨어는 치료 상세 보고서를 PDF로 생성해야 한다.", "SDS-REP-001", "HBOT Treatment Report", "PDF 내용 일치성 시험"],
+    ["SRS-008", "소프트웨어는 운영로그를 PDF로 생성해야 한다.", "SDS-REP-002", "Operation Logs Report", "필터/건수/페이지 시험"],
+    ["SRS-009", "치료 데이터는 중앙 서버로 전송되어야 한다.", "SDS-NET-001", "REST API/전송 큐", "성공/실패/재시도 시험"],
+    ["SRS-010", "환자정보 및 치료기록은 권한 없는 접근으로부터 보호되어야 한다.", "SEC-001~SEC-008", "접근통제/저장/전송보안", "보안 요구사항 검증"],
+  ]));
+
+  add(headingBlock(0, 2, "8. 첨부자료 분석 결과"));
+  add(paragraphBlock(0, "첨부자료는 참조 문서, 현재 구현 ZIP, PDF 보고서, 운영로그, 화면 캡처/영상, Android 코드/설정 자료로 분류하여 설계 근거로 사용하였다. 화면 캡처와 영상은 UI 흐름의 근거, PDF는 실제 내보내기 산출물의 항목과 형식을 확인하는 근거, Android 프로젝트 파일은 구현 모듈·권한·통신·저장소 설계 검토의 근거로 사용한다."));
+  add(tableBlock(0, "참조파일 형식 기준", ["파일명", "형식", "크기", "반영할 형식 요소"], referenceRows.length ? referenceRows : [["참조파일 없음", "-", "-", "기본 IB-SDF 구조로 생성"]]));
+  add(tableBlock(0, "현재 근거 요약", ["구분", "확인된 내용", "설계 반영 위치"], evidenceRows));
+  add(tableBlock(0, "ZIP 내부 근거 요약", ["첨부 ZIP", "총 파일", "문서 후보", "코드/설정 후보", "이미지/영상 후보"], zipRows.length ? zipRows : [["ZIP 첨부 없음", "-", "-", "-", "-"]]));
+  add(tableBlock(0, "사용한 근거 파일", ["파일명", "근거 유형", "비고"], inventoryRows.length ? inventoryRows.map(row => [row[0], row[1], row[4]]) : [["첨부파일 없음", "-", "-"]]));
+  add(headingBlock(0, 2, "8.1 확인 필요 사항"));
+  add(tableBlock(0, "확인 필요 항목", ["항목", "필요 근거", "우선순위"], missingRows));
+  add(headingBlock(0, 2, "부록. 제출 전 보완 체크리스트"));
+  add(tableBlock(0, "제출 전 보완 체크리스트", ["구분", "확인 항목", "상태"], [
+    ["문서정보", "문서번호, 제정일, 개정일, 개정번호, 작성/검토/승인자 확정", "☐"],
+    ["제품정보", "제품명, 모델명, 소프트웨어 형명/버전 확정", "☐"],
+    ["SRS 연계", "S/W 요구사항명세서 ID와 SDS ID 추적성 연결", "☐"],
+    ["위험관리 연계", "위험관리파일의 위험통제와 설계/검증 항목 연결", "☐"],
+    ["API 명세", "REST/WebSocket 엔드포인트, 인증, 실패처리 정의", "☐"],
+    ["데이터 보안", "DB/파일/PDF/서버 전송 보안 정책 확정", "☐"],
+    ["시험자료", "단위시험, 통합시험, 시스템시험, PDF 산출물 검증 결과 첨부", "☐"],
+    ["형상관리", "소스코드 태그, 빌드 산출물, 릴리즈노트, 설치파일 해시 관리", "☐"],
+    ["사용자 문서", "사용설명서, 관리자 매뉴얼, 유지보수 절차와 기능명 일치 확인", "☐"],
+  ]));
+
+  return { title: `${titleBase} SW 상세설계파일 인허가 초안`, blocks };
+}
+
+function buildCurrentEvidenceRows(files) {
+  const rows = [];
+  const combined = files.map(file => `${file.filename}\n${file.text || ""}`).join("\n");
+  const checks = [
+    ["화면 캡처/영상", /스크린샷|screenshot|\.png|\.jpg|\.jpeg|\.webp|\.mp4|screen-/i, "로그인, 환자번호 입력, 프로파일 선택/편집, 치료 운전, 치료기록, 운영로그, 보고서 미리보기 화면의 UI 근거", "4장, 5장"],
+    ["치료 상세 보고서 PDF", /HBOT|Treatment Report|Pressure Profile|O₂|O2|Event Log|HBOT_Report/i, "환자정보, 치료정보, 압력 프로파일, 산소농도, 이벤트 로그, 출력일시 구성", "5.5, 6.1"],
+    ["운영로그 PDF", /operation_logs|Operation Logs|Generated|Filter|minimum|Count|최소|운영로그/i, "운영로그 생성일자, 필터, 최소시간, Count, 목록 컬럼, 페이지 구성", "5.5, 6.1"],
+    ["Android 프로젝트", /AndroidManifest\.xml|build\.gradle|settings\.gradle|\.kt|\.java|res\/layout|strings\.xml/i, "Manifest, Gradle, layout, strings, Kotlin/Java 소스 기반 구현 근거", "3장, 4장, 5장"],
+    ["로그/내보내기", /log|export|pdf|download|room|database|storage/i, "치료기록·운영로그 조회 및 PDF 내보내기 기능 후보", "4.1.3, 5.5, 6장"],
+    ["통신/서버 전송", /websocket|socket|REST|https?|server|api|전송|중앙 서버/i, "치료 완료 데이터 전송, 실시간 상태 수신, 실패 처리 정책 검토 근거", "3장, 4.3, 5.2"],
   ];
-  const blocks = [
-    headingBlock(0, 1, `${profile.product_name || state.project.title || "현재 프로그램"} 인허가 문서 초안`),
-    paragraphBlock(1, `${fallbackReason ? `Gemini 생성 실패 사유: ${fallbackReason}\n` : ""}본 초안은 참조파일과 첨부 ZIP/문서를 브라우저에서 읽어 생성한 SW 인허가 문서 검토용 초안입니다. 참조파일이 SW 상세설계파일/IB-SDF 양식이면 해당 목차·문체·표 구성을 우선 반영하고, 현재 구현 근거는 첨부파일에서 확인 가능한 범위만 사용합니다. 규제/안전/성능/시험 결과는 제공된 근거 범위 내에서만 반영하며, 확인되지 않은 항목은 [확인 필요: ...]로 표시했습니다.`),
-    headingBlock(2, 2, "0. 참조파일 형식 반영 기준"),
-    tableBlock(3, "참조파일 형식 기준", ["파일명", "형식", "크기", "반영할 형식 요소"], referenceRows.length ? referenceRows : [["참조파일 없음", "-", "-", "기본 인허가 문서 구조로 생성"]]),
-    headingBlock(4, 2, "0. 제·개정 이력표"),
-    tableBlock(5, "제·개정 이력", ["개정번호", "제·개정일", "제·개정 이력 사항"], [["0", "[확인 필요: 제정일]", "첨부 참조 문서 및 현재 ZIP 근거를 기반으로 SW 상세설계파일 초안 작성"]]),
-    headingBlock(6, 2, "1. 개요 (Introduction)"),
-    tableBlock(7, "현재 버전 기본 정보", ["항목", "내용"], [
-      ["프로그램명", profile.product_name || "[확인 필요: 현재 프로그램명]"],
-      ["SW 버전/빌드", profile.software_version || "[확인 필요: SW 버전/빌드]"],
-      ["대상 장비/하드웨어", profile.target_hardware || "[확인 필요: 대상 장비/하드웨어]"],
-      ["대상 규제/기관", profile.target_regulator || "[확인 필요: 대상 규제/기관]"],
-      ["사용 목적", profile.intended_use || "[확인 필요: 사용 목적]"],
-    ]),
-    headingBlock(8, 2, "2. 용어정의 (Terminology and Definitions)"),
-    tableBlock(9, "용어정의", ["용어", "정의"], [["S/W 아키텍처 설계도", "소프트웨어 주요 기능 유닛, 하드웨어, 데이터 흐름 관계를 나타낸 구조도"], ["S/W 설계 기술서", "요구사항을 만족하기 위한 소프트웨어 구성요소와 내부 인터페이스 설명"], ["S/W 설계 명세서", "요구사항을 어떻게 구현하는지 설명하는 상세 설계 명세"]]),
-    headingBlock(10, 2, "3. S/W 아키텍처 설계도"),
-    { id: makeId("block"), type: "diagram", order: 11, content: { title: "문서/자료 분석 기반 SW 아키텍처", code: "참조 문서/양식 ZIP → 형식 기준 추출\n현재 구현 ZIP/보고서/로그 → 기능 근거 추출\nGemini/로컬 생성기 → SW 상세설계파일 초안\n편집기 검토 → Word 다운로드" } },
-    headingBlock(12, 2, "4. S/W 설계 기술서 (Software Design Description)"),
-    tableBlock(13, "Android/현재 자료 근거 맵", ["구분", "추출 근거", "검토 포인트"], androidRows.length ? androidRows : [["현재 근거", "Android 프로젝트 ZIP 또는 매뉴얼/스크린샷 필요", "[확인 필요: 현재 화면/기능 근거]" ]]),
-    headingBlock(14, 2, "5. S/W 설계 명세서 (Software Design Specification)"),
-    tableBlock(15, "Old vs Current 변경 맵", ["Area", "Prior document", "Current evidence", "Action"], changeRows),
-    paragraphBlock(16, `제품명 ${profile.product_name || "[확인 필요: 프로그램명]"}의 현재 버전 소프트웨어는 ${profile.target_hardware || "[확인 필요: 대상 장비]"}와 함께 사용되는 소프트웨어로, ${profile.intended_use || "[확인 필요: 사용 목적]"}을 지원합니다. 본 문안은 첨부 자료 기준 초안이며, 최종 제출 전 기존 승인 문서의 공식 문구와 시험 결과표를 대조해야 합니다.`),
-    headingBlock(17, 2, "6. 검토 메모"),
-    tableBlock(18, "확인 필요 항목", ["항목", "필요 근거", "우선순위"], missingRows),
-    tableBlock(19, "첨부 자료 분류", ["파일명", "분류", "형식", "크기", "요약"], inventoryRows),
-    tableBlock(20, "사용한 근거 파일", ["파일명", "근거 유형", "비고"], inventoryRows.map(row => [row[0], row[1], row[4]])),
-  ];
-  return { title: `${profile.product_name || state.project.title || "현재 프로그램"} 인허가 문서 초안`, blocks };
+  for (const [kind, pattern, found, section] of checks) {
+    if (pattern.test(combined)) rows.push([kind, found, section]);
+  }
+  if (!rows.length) rows.push(["첨부자료", "파일명과 추출 텍스트 기준 현재 기능 근거 확인 필요", "8장"]);
+  return rows;
+}
+
+function buildZipEvidenceRows(files) {
+  return files.filter(file => file.extension === ".zip").map(file => {
+    const text = String(file.text || "");
+    const get = label => {
+      const m = text.match(new RegExp(`${label}:\\s*(\\d+)`, "i"));
+      return m ? m[1] : "[확인 필요]";
+    };
+    return [file.filename, get("총 파일 수"), get("내부 문서 후보"), get("코드/설정 후보"), get("이미지/영상 후보")];
+  });
+}
+
+function isLowQualityRegulatoryDraft(draft) {
+  if (!draft || !Array.isArray(draft.blocks)) return true;
+  const text = JSON.stringify(draft, null, 0);
+  const sectionHits = ["S/W 설계 기술서", "S/W 설계 명세서", "S/W 아키텍처", "용어정의", "제·개정", "요구사항 추적성"].filter(keyword => text.includes(keyword)).length;
+  const hwpExcuseCount = (text.match(/HWP|본문 추출|추출 제한|작성해야 합니다|확인할 수 없습니다/g) || []).length;
+  const tableCount = draft.blocks.filter(block => block.type === "table").length;
+  const blockCount = draft.blocks.length;
+  return blockCount < 24 || tableCount < 8 || sectionHits < 4 || (hwpExcuseCount >= 5 && blockCount < 35);
+}
+
+function ensureRegulatoryDraftQuality(draft, files, referenceFiles = [], reason = "") {
+  if ((state.settings.document_mode || DEFAULT_DOCUMENT_MODE) === "report") return draft;
+  if (!isLowQualityRegulatoryDraft(draft)) return draft;
+  const improved = generateRegulatoryLocalDraft(files, reason || "Gemini 초안이 IB-SDF 품질 기준에 미달하여 내장 S/W 상세설계파일 템플릿으로 재구성", referenceFiles);
+  return improved;
 }
 
 

@@ -2,9 +2,20 @@ const STORAGE_SETTINGS = "document-insight-settings-v2";
 const STORAGE_LAST_PROJECT = "document-insight-last-project-v2";
 const STORAGE_PROJECT_PREFIX = "document-insight-project-v2:";
 
-const DEFAULT_MODEL = "gemini-2.5-pro";
-const FALLBACK_MODEL = "gemini-2.5-flash";
-const MODEL_PRESETS = ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"];
+const DEFAULT_PROVIDER = "openai";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-pro";
+const PREMIUM_MODEL = "gemini-2.5-pro";
+const FLASH_MODEL = "gemini-2.5-flash";
+const LITE_MODEL = "gemini-2.5-flash-lite";
+const DEFAULT_OPENAI_MODEL = "gpt-5.5";
+const OPENAI_PREMIUM_MODEL = "gpt-5.5";
+const OPENAI_BALANCED_MODEL = "gpt-5.4";
+const OPENAI_FAST_MODEL = "gpt-5.3-instant";
+const OPENAI_STABLE_MODEL = "gpt-5";
+const OPENAI_MINI_MODEL = "gpt-5-mini";
+const OPENAI_NANO_MODEL = "gpt-5-nano";
+const MODEL_PRESETS = [PREMIUM_MODEL, FLASH_MODEL, LITE_MODEL];
+const OPENAI_MODEL_PRESETS = [OPENAI_PREMIUM_MODEL, OPENAI_BALANCED_MODEL, OPENAI_FAST_MODEL, OPENAI_STABLE_MODEL, OPENAI_MINI_MODEL, OPENAI_NANO_MODEL];
 const MAX_FILES = 10;
 const MAX_REFERENCE_FILES = 1;
 const MAX_FILE_SIZE = 200 * 1024 * 1024;
@@ -37,7 +48,7 @@ let state = {
   },
   busy: false,
   busyMessage: "",
-  status: "GitHub Pages 정적 모드입니다. 백엔드 없이 브라우저에서 파일을 읽고 Gemini API를 직접 호출합니다.",
+  status: "GitHub Pages 정적 모드입니다. 백엔드 없이 브라우저에서 파일을 읽고 AI API를 직접 호출합니다.",
   toasts: [],
   preview: null,
 };
@@ -115,13 +126,31 @@ function render() {
         </section>
 
         <section class="panel">
-          <label for="gemini-key" class="label">Gemini API Key</label>
+          <label for="ai-provider" class="label">AI 제공자 선택</label>
+          <select id="ai-provider">
+            <option value="openai" ${(state.settings.ai_provider || DEFAULT_PROVIDER) === "openai" ? "selected" : ""}>OpenAI GPT · 상세설계/이미지 분석 권장</option>
+            <option value="gemini" ${(state.settings.ai_provider || DEFAULT_PROVIDER) === "gemini" ? "selected" : ""}>Google Gemini · 기존 방식</option>
+          </select>
+
+          <label for="openai-key" class="label">OpenAI API Key</label>
+          <input id="openai-key" type="password" placeholder="${state.settings.openai_api_key ? "저장된 키 사용 중" : "sk-..."}" />
+          <label for="openai-model" class="label">GPT 모델 선택</label>
+          <select id="openai-model">
+            <option value="gpt-5.5" ${(state.settings.openai_model || DEFAULT_OPENAI_MODEL) === "gpt-5.5" ? "selected" : ""}>gpt-5.5 · 최고품질 / 이미지 분석·상세설계 권장</option>
+            <option value="gpt-5.4" ${(state.settings.openai_model || DEFAULT_OPENAI_MODEL) === "gpt-5.4" ? "selected" : ""}>gpt-5.4 · 고품질 / 속도 균형</option>
+            <option value="gpt-5.3-instant" ${(state.settings.openai_model || DEFAULT_OPENAI_MODEL) === "gpt-5.3-instant" ? "selected" : ""}>gpt-5.3-instant · 빠른 초안</option>
+            <option value="gpt-5" ${(state.settings.openai_model || DEFAULT_OPENAI_MODEL) === "gpt-5" ? "selected" : ""}>gpt-5 · 안정형</option>
+            <option value="gpt-5-mini" ${(state.settings.openai_model || DEFAULT_OPENAI_MODEL) === "gpt-5-mini" ? "selected" : ""}>gpt-5-mini · 비용 절감</option>
+            <option value="gpt-5-nano" ${(state.settings.openai_model || DEFAULT_OPENAI_MODEL) === "gpt-5-nano" ? "selected" : ""}>gpt-5-nano · 간단 요약</option>
+          </select>
+
+          <label for="gemini-key" class="label">AI API Key</label>
           <input id="gemini-key" type="password" placeholder="${state.settings.gemini_api_key ? "저장된 키 사용 중" : "AIza..."}" />
           <label for="gemini-model" class="label">Gemini 모델 선택</label>
           <select id="gemini-model">
-            <option value="gemini-2.5-pro" ${(state.settings.gemini_model || DEFAULT_MODEL) === "gemini-2.5-pro" ? "selected" : ""}>gemini-2.5-pro · 상세설계/인허가 문서 권장</option>
-            <option value="gemini-2.5-flash" ${(state.settings.gemini_model || DEFAULT_MODEL) === "gemini-2.5-flash" ? "selected" : ""}>gemini-2.5-flash · 속도/품질 균형</option>
-            <option value="gemini-2.5-flash-lite" ${(state.settings.gemini_model || DEFAULT_MODEL) === "gemini-2.5-flash-lite" ? "selected" : ""}>gemini-2.5-flash-lite · 간단 요약/저비용</option>
+            <option value="gemini-2.5-pro" ${(state.settings.gemini_model || DEFAULT_GEMINI_MODEL) === "gemini-2.5-pro" ? "selected" : ""}>gemini-2.5-pro · 최고품질 / 이미지 분석·상세설계 권장</option>
+            <option value="gemini-2.5-flash" ${(state.settings.gemini_model || DEFAULT_GEMINI_MODEL) === "gemini-2.5-flash" ? "selected" : ""}>gemini-2.5-flash · 속도/품질 균형</option>
+            <option value="gemini-2.5-flash-lite" ${(state.settings.gemini_model || DEFAULT_GEMINI_MODEL) === "gemini-2.5-flash-lite" ? "selected" : ""}>gemini-2.5-flash-lite · 간단 요약 / 저비용</option>
           </select>
           <label for="pipeline-mode" class="label">생성 품질 모드</label>
           <select id="pipeline-mode">
@@ -129,8 +158,9 @@ function render() {
             <option value="two_step" ${(state.settings.pipeline_mode || "high_quality") === "two_step" ? "selected" : ""}>2단계 분석</option>
             <option value="single_pass" ${(state.settings.pipeline_mode || "high_quality") === "single_pass" ? "selected" : ""}>단일 생성</option>
           </select>
-          <button id="save-settings" type="button" ${state.busy ? "disabled" : ""}>Gemini 설정 저장</button>
-          <small>${state.settings.gemini_api_key ? "상세설계 문서는 gemini-2.5-pro + 고품질 2단계 분석을 권장합니다. 키는 이 브라우저 localStorage에만 저장됩니다." : "키가 없으면 이미지 해석 없는 로컬 SDF 템플릿으로 초안을 생성합니다."}</small>
+          <button id="save-settings" type="button" ${state.busy ? "disabled" : ""}>AI 설정 저장</button>
+          <small>${currentAiKey() ? `${currentAiProviderLabel()} / ${currentAiModel()} 사용 중입니다. 선택한 모델만 사용하며 자동 하위 모델 전환은 하지 않습니다. API Key는 이 브라우저 localStorage에만 저장됩니다.` : "선택한 제공자의 API Key가 없으면 이미지 해석 없는 로컬 SDF 템플릿으로 초안을 생성합니다."}</small>
+          <small>주의: GitHub Pages 정적 모드에서는 API Key를 브라우저에 저장해 직접 호출합니다. 사내/상용 배포에서는 백엔드 프록시 사용을 권장합니다.</small>
         </section>
 
         <section class="panel reference-panel">
@@ -165,7 +195,7 @@ function render() {
             <span class="label">팀 공유 링크</span>
             <button id="copy-share" class="secondary" ${state.busy ? "disabled" : ""}>현재 상태 링크 복사</button>
             <button id="clear-files" class="danger" ${state.busy || !(state.project?.files?.length) ? "disabled" : ""}>첨부파일 제거</button>
-            <small>현재 초안/편집 내용은 링크에 포함하고, 첨부파일 원문과 Gemini API Key는 제외합니다.</small>
+            <small>현재 초안/편집 내용은 링크에 포함하고, 첨부파일 원문과 AI API Key는 제외합니다.</small>
             <small>첨부파일 제거를 누르면 이 브라우저 저장본에서도 파일 본문을 삭제하고, 파일명 메타데이터만 남깁니다.</small>
           </section>
         ` : ""}
@@ -480,7 +510,7 @@ function analysisPipelineTemplate() {
 function bindEvents() {
   document.getElementById("create-project")?.addEventListener("click", createProject);
   document.getElementById("save-settings")?.addEventListener("click", saveSettings);
-  ["doc-mode", "gemini-model", "pipeline-mode", "product-name", "software-version", "target-hardware", "target-regulator", "intended-use"].forEach(id => {
+  ["doc-mode", "ai-provider", "openai-model", "gemini-model", "pipeline-mode", "product-name", "software-version", "target-hardware", "target-regulator", "intended-use"].forEach(id => {
     document.getElementById(id)?.addEventListener("change", saveSettings);
   });
   document.getElementById("reference-files")?.addEventListener("change", uploadReferenceFiles);
@@ -595,7 +625,7 @@ async function copyTeamShareLink() {
     return;
   }
   await navigator.clipboard.writeText(url);
-  pushToast("success", "복사 완료", "팀원이 열 수 있는 현재 상태 공유 링크를 복사했습니다. 첨부파일 원문과 Gemini API Key는 포함되지 않습니다.");
+  pushToast("success", "복사 완료", "팀원이 열 수 있는 현재 상태 공유 링크를 복사했습니다. 첨부파일 원문과 AI API Key는 포함되지 않습니다.");
 }
 
 function clearProjectAttachments() {
@@ -730,7 +760,9 @@ function createSharePayload() {
 
 function publicSettingsSnapshot() {
   return {
-    gemini_model: state.settings.gemini_model || DEFAULT_MODEL,
+    ai_provider: state.settings.ai_provider || DEFAULT_PROVIDER,
+    openai_model: state.settings.openai_model || DEFAULT_OPENAI_MODEL,
+    gemini_model: state.settings.gemini_model || DEFAULT_GEMINI_MODEL,
     document_mode: state.settings.document_mode || DEFAULT_DOCUMENT_MODE,
     product_name: state.settings.product_name || "",
     software_version: state.settings.software_version || "",
@@ -752,11 +784,13 @@ function importSharedPayload(payload) {
   if (!payload || Number(payload.v) !== SHARE_STATE_VERSION || !payload.project) {
     throw new Error("지원하지 않는 공유 링크 형식입니다.");
   }
-  const previousApiKey = state.settings.gemini_api_key || "";
+  const previousGeminiApiKey = state.settings.gemini_api_key || "";
+  const previousOpenAiApiKey = state.settings.openai_api_key || "";
   state.settings = {
     ...state.settings,
     ...publicSettingsFromPayload(payload.settings || {}),
-    gemini_api_key: previousApiKey,
+    gemini_api_key: previousGeminiApiKey,
+    openai_api_key: previousOpenAiApiKey,
   };
   saveSettingsToStorage(state.settings);
 
@@ -783,7 +817,9 @@ function importSharedPayload(payload) {
 
 function publicSettingsFromPayload(settings) {
   return {
-    gemini_model: settings.gemini_model || DEFAULT_MODEL,
+    ai_provider: settings.ai_provider || DEFAULT_PROVIDER,
+    openai_model: settings.openai_model || DEFAULT_OPENAI_MODEL,
+    gemini_model: settings.gemini_model || DEFAULT_GEMINI_MODEL,
     document_mode: settings.document_mode || DEFAULT_DOCUMENT_MODE,
     pipeline_mode: settings.pipeline_mode || "high_quality",
     product_name: settings.product_name || "",
@@ -846,11 +882,16 @@ function decodeBase64UrlUnicode(value) {
 }
 
 function saveSettings() {
-  const key = document.getElementById("gemini-key")?.value?.trim() || "";
-  const model = document.getElementById("gemini-model")?.value?.trim() || DEFAULT_MODEL;
+  const geminiKey = document.getElementById("gemini-key")?.value?.trim() || "";
+  const openaiKey = document.getElementById("openai-key")?.value?.trim() || "";
+  const provider = document.getElementById("ai-provider")?.value || DEFAULT_PROVIDER;
+  const geminiModel = document.getElementById("gemini-model")?.value?.trim() || DEFAULT_GEMINI_MODEL;
+  const openaiModel = document.getElementById("openai-model")?.value?.trim() || DEFAULT_OPENAI_MODEL;
   state.settings = {
     ...state.settings,
-    gemini_model: model,
+    ai_provider: provider,
+    gemini_model: geminiModel,
+    openai_model: openaiModel,
     document_mode: document.getElementById("doc-mode")?.value || state.settings.document_mode || DEFAULT_DOCUMENT_MODE,
     pipeline_mode: document.getElementById("pipeline-mode")?.value || state.settings.pipeline_mode || "high_quality",
     product_name: document.getElementById("product-name")?.value?.trim() || "",
@@ -859,11 +900,12 @@ function saveSettings() {
     target_regulator: document.getElementById("target-regulator")?.value?.trim() || "",
     intended_use: document.getElementById("intended-use")?.value?.trim() || "",
   };
-  if (key) state.settings.gemini_api_key = key;
+  if (geminiKey) state.settings.gemini_api_key = geminiKey;
+  if (openaiKey) state.settings.openai_api_key = openaiKey;
   saveSettingsToStorage(state.settings);
-  state.status = state.settings.gemini_api_key
-    ? "설정이 저장되었습니다. Gemini 직접 호출과 인허가 문서 생성 스킬이 적용됩니다."
-    : "설정이 저장되었습니다. 키가 없으면 인허가 체크리스트 기반 로컬 초안으로 생성합니다.";
+  state.status = currentAiKey()
+    ? `설정이 저장되었습니다. ${currentAiProviderLabel()} ${currentAiModel()} 모델로 인허가 문서 생성 스킬이 적용됩니다.`
+    : "설정이 저장되었습니다. 선택한 제공자의 키가 없으면 인허가 체크리스트 기반 로컬 초안으로 생성합니다.";
   pushToast("success", "저장 완료", state.status);
   render();
 }
@@ -1495,37 +1537,37 @@ async function analyzeProject() {
     state.project.analysis_bundle = analysisBundle;
     persistProject(false);
 
-    if (state.settings.gemini_api_key && regulatoryMode && mode !== "single_pass") {
-      state.status = "1/4 Gemini가 ZIP 내부 이미지와 파일 목록을 화면/기능별로 분류하는 중입니다.";
+    if (currentAiKey() && regulatoryMode && mode !== "single_pass") {
+      state.status = `1/4 ${currentAiProviderLabel()}가 ZIP 내부 이미지와 파일 목록을 화면/기능별로 분류하는 중입니다.`;
       render();
       try {
-        const remoteBundle = await generateEvidenceMapWithGemini(parsedFiles, referenceFiles, analysisBundle);
+        const remoteBundle = await generateEvidenceMapWithAi(parsedFiles, referenceFiles, analysisBundle);
         analysisBundle = normalizeAnalysisBundle(remoteBundle, analysisBundle);
         state.project.analysis_bundle = analysisBundle;
         persistProject(false);
       } catch (error) {
-        console.warn("Gemini evidence map failed; keep local analysis", error);
-        pushToast("error", "1단계 분석 보정", `${error.message} 로컬 근거 맵으로 계속 진행합니다.`, false);
+        console.warn("AI evidence map failed; keep local analysis", error);
+        pushToast("error", "1단계 분석 보정", `${summarizeAiError(error)} 로컬 근거 맵으로 계속 진행합니다.`, false);
       }
     }
 
     let draft;
-    if (state.settings.gemini_api_key) {
+    if (currentAiKey()) {
       state.status = regulatoryMode
-        ? "2/4 Gemini가 SDD/SDS 상세설계 본문을 작성하는 중입니다."
-        : "Gemini API로 일반 보고서 초안을 생성하는 중입니다.";
+        ? `2/4 ${currentAiProviderLabel()}가 SDD/SDS 상세설계 본문을 작성하는 중입니다.`
+        : `${currentAiProviderLabel()} API로 일반 보고서 초안을 생성하는 중입니다.`;
       render();
       try {
-        draft = await generateDraftWithGemini(parsedFiles, referenceFiles, analysisBundle);
+        draft = await generateDraftWithAi(parsedFiles, referenceFiles, analysisBundle);
         if (regulatoryMode && mode === "high_quality") {
-          state.status = "3/4 Gemini가 인허가 문서 심사관 관점으로 품질을 검토하고 보강하는 중입니다.";
+          state.status = `3/4 ${currentAiProviderLabel()}가 인허가 문서 심사관 관점으로 품질을 검토하고 보강하는 중입니다.`;
           render();
-          draft = await reviewRegulatoryDraftWithGemini(draft, parsedFiles, referenceFiles, analysisBundle);
+          draft = await reviewRegulatoryDraftWithAi(draft, parsedFiles, referenceFiles, analysisBundle);
         }
       } catch (error) {
-        console.warn("Gemini generation failed; fallback to local draft", error);
-        pushToast("error", "Gemini 응답 보정 실패", `${error.message} 로컬 SDF 초안으로 대체합니다.`, false);
-        draft = generateLocalDraft(parsedFiles, error.message, referenceFiles);
+        console.warn("AI generation failed; fallback to local draft", error);
+        pushToast("error", `${currentAiProviderLabel()} 응답 보정 실패`, `${summarizeAiError(error)} 로컬 SDF 초안으로 대체합니다.`, false);
+        draft = generateLocalDraft(parsedFiles, summarizeAiError(error), referenceFiles);
       }
     } else {
       draft = generateLocalDraft(parsedFiles, "", referenceFiles);
@@ -1549,8 +1591,70 @@ async function analyzeProject() {
 }
 
 
+function currentAiProvider() {
+  return state.settings.ai_provider || DEFAULT_PROVIDER;
+}
+
+function currentAiProviderLabel() {
+  return currentAiProvider() === "openai" ? "OpenAI GPT" : "Gemini";
+}
+
 function currentGeminiModel() {
-  return state.settings.gemini_model || DEFAULT_MODEL;
+  return state.settings.gemini_model || DEFAULT_GEMINI_MODEL;
+}
+
+function currentOpenAiModel() {
+  return state.settings.openai_model || DEFAULT_OPENAI_MODEL;
+}
+
+function currentAiModel() {
+  return currentAiProvider() === "openai" ? currentOpenAiModel() : currentGeminiModel();
+}
+
+function currentAiKey() {
+  return currentAiProvider() === "openai" ? (state.settings.openai_api_key || "") : (state.settings.gemini_api_key || "");
+}
+
+function candidateGeminiModels(preferredModel = currentGeminiModel()) {
+  const preferred = preferredModel || DEFAULT_GEMINI_MODEL;
+  return [preferred];
+}
+
+function summarizeAiError(error) {
+  return currentAiProvider() === "openai" ? summarizeOpenAiError(error) : summarizeGeminiError(error);
+}
+
+function summarizeGeminiError(error) {
+  const raw = String(error?.rawMessage || error?.message || "AI API 호출 실패");
+  const model = error?.model ? `(${error.model}) ` : "";
+  if (/quota|rate[- ]?limit|resource_exhausted|exceeded|billing|limit/i.test(raw)) {
+    return `${model}Gemini 할당량 또는 요금제 제한으로 일부 단계가 실패했습니다.`;
+  }
+  if (/model.*not.*found|not supported|not available|permission|denied/i.test(raw)) {
+    return `${model}선택한 Gemini 모델을 현재 API Key에서 사용할 수 없습니다.`;
+  }
+  if (/JSON|parse|Unexpected|valid/i.test(raw)) {
+    return `${model}Gemini 응답 형식이 문서 생성 JSON 형식과 맞지 않았습니다.`;
+  }
+  return `${model}${raw.slice(0, 180)}`;
+}
+
+function summarizeOpenAiError(error) {
+  const raw = String(error?.rawMessage || error?.message || "OpenAI API 호출 실패");
+  const model = error?.model ? `(${error.model}) ` : "";
+  if (/quota|rate[- ]?limit|insufficient_quota|billing|exceeded|limit/i.test(raw)) {
+    return `${model}OpenAI 할당량 또는 요금제 제한으로 일부 단계가 실패했습니다.`;
+  }
+  if (/model.*not.*found|not supported|not available|permission|denied|does not exist/i.test(raw)) {
+    return `${model}선택한 GPT 모델을 현재 OpenAI API Key에서 사용할 수 없습니다.`;
+  }
+  if (/cors|failed to fetch|network/i.test(raw)) {
+    return `${model}OpenAI API 직접 호출이 브라우저/CORS 또는 네트워크 정책으로 실패했습니다. 정식 배포는 백엔드 프록시를 권장합니다.`;
+  }
+  if (/JSON|parse|Unexpected|valid/i.test(raw)) {
+    return `${model}GPT 응답 형식이 문서 생성 JSON 형식과 맞지 않았습니다.`;
+  }
+  return `${model}${raw.slice(0, 180)}`;
 }
 
 function buildGeminiParts(prompt, files = [], options = {}) {
@@ -1561,10 +1665,28 @@ function buildGeminiParts(prompt, files = [], options = {}) {
   assets.forEach((asset, index) => {
     const inline = dataUrlToInlineData(asset.dataUrl);
     if (!inline) return;
-    parts.push({ text: `\n[IMAGE_EVIDENCE_${index + 1}] filename=${asset.name || asset.filename || "image"}; source=${asset.source || "첨부 ZIP"}; role=${asset.role || "screen evidence"}; caption_hint=${asset.caption || "화면 증거 이미지"}\n이 이미지를 화면명, 주요 UI 요소, 기능, SDD/SDS 연결 근거 관점으로 해석하세요.` });
+    parts.push({ text: `
+[IMAGE_EVIDENCE_${index + 1}] filename=${asset.name || asset.filename || "image"}; source=${asset.source || "첨부 ZIP"}; role=${asset.role || "screen evidence"}; caption_hint=${asset.caption || "화면 증거 이미지"}
+이 이미지를 화면명, 주요 UI 요소, 기능, SDD/SDS 연결 근거 관점으로 해석하세요.` });
     parts.push({ inlineData: inline });
   });
   return parts;
+}
+
+function buildOpenAiContent(prompt, files = [], options = {}) {
+  const content = [{ type: "input_text", text: String(prompt || "") }];
+  const maxImages = Number(options.maxImages || 0);
+  if (!maxImages) return content;
+  const assets = collectEvidenceImages(files).slice(0, maxImages);
+  assets.forEach((asset, index) => {
+    const imageUrl = String(asset.dataUrl || "");
+    if (!imageUrl.startsWith("data:")) return;
+    content.push({ type: "input_text", text: `
+[IMAGE_EVIDENCE_${index + 1}] filename=${asset.name || asset.filename || "image"}; source=${asset.source || "첨부 ZIP"}; role=${asset.role || "screen evidence"}; caption_hint=${asset.caption || "화면 증거 이미지"}
+이 이미지를 화면명, 주요 UI 요소, 기능, SDD/SDS 연결 근거 관점으로 해석하세요.` });
+    content.push({ type: "input_image", image_url: imageUrl, detail: "high" });
+  });
+  return content;
 }
 
 function dataUrlToInlineData(dataUrl) {
@@ -1574,30 +1696,142 @@ function dataUrlToInlineData(dataUrl) {
 }
 
 async function callGeminiJson(prompt, options = {}) {
-  const model = currentGeminiModel();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.gemini_api_key)}`;
-  const finalPrompt = options.retryInstruction ? `${prompt}\n\n${options.retryInstruction}` : prompt;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: buildGeminiParts(finalPrompt, options.files || [], options) }],
-      generationConfig: {
-        temperature: Number.isFinite(options.temperature) ? options.temperature : 0.12,
-        maxOutputTokens: options.maxOutputTokens || 24576,
-        responseMimeType: "application/json",
+  if (currentAiProvider() === "openai") {
+    return callOpenAiJson(prompt, options);
+  }
+  const selectedModel = options.model || currentGeminiModel();
+  const models = candidateGeminiModels(selectedModel);
+  const finalPrompt = options.retryInstruction ? `${prompt}
+
+${options.retryInstruction}` : prompt;
+  let lastError = null;
+
+  for (const model of models) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.gemini_api_key)}`;
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: buildGeminiParts(finalPrompt, options.files || [], options) }],
+          generationConfig: {
+            temperature: Number.isFinite(options.temperature) ? options.temperature : 0.12,
+            maxOutputTokens: options.maxOutputTokens || 24576,
+            responseMimeType: "application/json",
+          },
+        }),
+      });
+    } catch (networkError) {
+      networkError.model = model;
+      networkError.rawMessage = networkError.message;
+      throw networkError;
+    }
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      const rawMessage = payload?.error?.message || `AI API 호출 실패: HTTP ${response.status}`;
+      const error = new Error(summarizeGeminiError({ message: rawMessage, rawMessage, status: response.status, model }));
+      error.rawMessage = rawMessage;
+      error.status = response.status;
+      error.model = model;
+      lastError = error;
+      throw error;
+    }
+
+    const payload = await response.json();
+    const text = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\\n");
+    if (!text) {
+      const emptyError = new Error("Gemini 응답이 비어 있습니다.");
+      emptyError.model = model;
+      throw emptyError;
+    }
+    try {
+      const parsed = parseDraftJson(text);
+      if (parsed && typeof parsed === "object") {
+        parsed.model_used = model;
+        parsed.model_requested = selectedModel;
+        parsed.provider = "gemini";
+      }
+      return parsed;
+    } catch (parseError) {
+      parseError.model = model;
+      parseError.rawMessage = parseError.message;
+      throw parseError;
+    }
+  }
+  throw lastError || new Error("AI API 호출에 실패했습니다.");
+}
+
+async function callOpenAiJson(prompt, options = {}) {
+  const model = options.model || currentOpenAiModel();
+  const finalPrompt = options.retryInstruction ? `${prompt}
+
+${options.retryInstruction}` : prompt;
+  let response;
+  try {
+    const body = {
+      model,
+      input: [{ role: "user", content: buildOpenAiContent(finalPrompt, options.files || [], options) }],
+      max_output_tokens: options.maxOutputTokens || 24576,
+      text: { format: { type: "json_object" } },
+    };
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${state.settings.openai_api_key || ""}`,
       },
-    }),
-  });
+      body: JSON.stringify(body),
+    });
+  } catch (networkError) {
+    networkError.model = model;
+    networkError.rawMessage = networkError.message;
+    throw networkError;
+  }
+
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    const message = payload?.error?.message || `Gemini API 호출 실패: HTTP ${response.status}`;
-    throw new Error(message);
+    const rawMessage = payload?.error?.message || payload?.error || `OpenAI API 호출 실패: HTTP ${response.status}`;
+    const error = new Error(summarizeOpenAiError({ message: rawMessage, rawMessage, status: response.status, model }));
+    error.rawMessage = rawMessage;
+    error.status = response.status;
+    error.model = model;
+    throw error;
   }
+
   const payload = await response.json();
-  const text = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n");
-  if (!text) throw new Error("Gemini 응답이 비어 있습니다.");
-  return parseDraftJson(text);
+  const text = extractOpenAiText(payload);
+  if (!text) {
+    const emptyError = new Error("OpenAI 응답이 비어 있습니다.");
+    emptyError.model = model;
+    throw emptyError;
+  }
+  try {
+    const parsed = parseDraftJson(text);
+    if (parsed && typeof parsed === "object") {
+      parsed.model_used = model;
+      parsed.model_requested = model;
+      parsed.provider = "openai";
+    }
+    return parsed;
+  } catch (parseError) {
+    parseError.model = model;
+    parseError.rawMessage = parseError.message;
+    throw parseError;
+  }
+}
+
+function extractOpenAiText(payload) {
+  if (typeof payload?.output_text === "string" && payload.output_text.trim()) return payload.output_text;
+  const chunks = [];
+  for (const item of payload?.output || []) {
+    for (const content of item?.content || []) {
+      if (typeof content?.text === "string") chunks.push(content.text);
+      if (typeof content?.value === "string") chunks.push(content.value);
+    }
+  }
+  return chunks.join("\\n").trim();
 }
 
 function buildLocalAnalysisBundle(files, referenceFiles = []) {
@@ -1615,7 +1849,9 @@ function buildLocalAnalysisBundle(files, referenceFiles = []) {
   return {
     version: 2,
     generated_by: "local-browser-analysis",
-    model_recommended: DEFAULT_MODEL,
+    model_recommended: DEFAULT_GEMINI_MODEL,
+    premium_model: PREMIUM_MODEL,
+    fallback_models: [],
     inventory,
     reference_files: referenceFiles.map(file => ({ filename: file.filename, extension: file.extension, summary: file.summary || "" })),
     screen_map,
@@ -1695,11 +1931,11 @@ function normalizeAnalysisBundle(remote, fallback) {
     evidence_map: Array.isArray(bundle.evidence_map) && bundle.evidence_map.length ? bundle.evidence_map : base.evidence_map || [],
     modules: Array.isArray(bundle.modules) && bundle.modules.length ? bundle.modules : base.modules || [],
     missing_items: Array.isArray(bundle.missing_items) && bundle.missing_items.length ? bundle.missing_items : base.missing_items || [],
-    generated_by: bundle.generated_by || `gemini-${currentGeminiModel()}`,
+    generated_by: bundle.generated_by || `${currentAiProvider()}-${currentAiModel()}`,
   };
 }
 
-async function generateEvidenceMapWithGemini(files, referenceFiles = [], localBundle = null) {
+async function generateEvidenceMapWithAi(files, referenceFiles = [], localBundle = null) {
   const prompt = buildEvidenceMapPrompt(files, referenceFiles, localBundle);
   return callGeminiJson(prompt, {
     files,
@@ -1716,7 +1952,7 @@ function buildEvidenceMapPrompt(files, referenceFiles = [], localBundle = null) 
   return `당신은 의료기기 소프트웨어 인허가 문서의 첨부자료 분석자입니다. 최종 문서를 바로 쓰지 말고, 먼저 ZIP 내부 이미지/보고서/파일을 SDD/SDS 작성 근거로 분류하세요.\n\n반드시 JSON 객체만 반환하세요. 마크다운 금지.\n\n반환 스키마:\n{\n  "generated_by":"gemini-evidence-map",\n  "inventory":[{"filename":"파일명","type":"Reference|Screen|Report|Log|AndroidCode|Other","summary":"근거 요약"}],\n  "screen_map":[{"no":1,"filename":"이미지 파일명","screen":"화면명","category":"Login|Patient|Profile|TreatmentRun|LogReport|Popup|Other","visible_elements":"보이는 UI 요소","design_use":"SDD/SDS에 반영할 설계 의미","sdd_section":"4.x/5.x","confidence":"high|medium|low"}],\n  "evidence_map":[{"category":"근거 분류","finding":"확인된 내용","section":"반영 섹션","limitations":"확인 필요"}],\n  "modules":[{"design_id":"SDS-...","module":"모듈명","description":"설계 의미","input":"입력","process":"처리","output":"출력","exception":"예외처리","evidence":["근거 파일"]}],\n  "missing_items":[{"item":"확인 필요 항목","evidence":"필요 근거","priority":"상|중|하"}]\n}\n\n분석 규칙:\n- 이미지마다 화면명을 구체화하세요. 예: 로그인 화면, 환자번호 입력, 프로파일 선택, 프로파일 에디터, 치료 운전, ABT/환경정보, 치료기록, 운영로그, 보고서 미리보기, 삭제 확인 팝업.\n- 이미지를 보고 보이는 UI 요소를 요약하세요. 임의로 안 보이는 내용은 쓰지 마세요.\n- 각 화면이 SDD/SDS 어느 항목의 근거인지 연결하세요.\n- HWP 본문 추출 실패는 한계로만 기록하고, IB-SDF 양식 적용 자체를 포기하지 마세요.\n\n현재 설정:\n- 프로그램명: ${profile.product_name || "[확인 필요]"}\n- 버전: ${profile.software_version || "[확인 필요]"}\n- 대상 장비: ${profile.target_hardware || "[확인 필요]"}\n\n파일 분류 힌트:\n${inventory}\n\n로컬 1차 분석:\n${localJson}`;
 }
 
-async function reviewRegulatoryDraftWithGemini(draft, files, referenceFiles = [], analysisBundle = null) {
+async function reviewRegulatoryDraftWithAi(draft, files, referenceFiles = [], analysisBundle = null) {
   const draftJson = JSON.stringify(stripImagesForGemini(draft)).slice(0, MAX_GEMINI_INPUT_CHARS);
   const prompt = `당신은 의료기기 SW 인허가 문서 심사 대응 편집자입니다. 아래 S/W 상세설계파일 초안을 검토하고, 제가 직접 작성한 수준에 가깝게 보강하세요.\n\n반드시 JSON 객체만 반환하세요. image 블록은 만들지 말고, 텍스트/표/다이어그램 블록만 반환하세요. 이후 시스템이 기존 이미지를 다시 삽입합니다.\n\n보강 기준:\n- SDD 4장은 화면별 기능 설명을 구체화하세요. 화면 목적, 입력, 처리, 출력, 예외처리, 인허가 검증 포인트를 포함하세요.\n- SDS 5장은 모듈별 설계 ID와 입력/처리/출력/예외처리/검증 방법을 표로 상세화하세요.\n- 이미지 분석 결과를 화면-설계 매핑 표에 반영하세요.\n- "확인 필요"는 필요한 곳에만 쓰고, 화면/파일명/PDF 항목으로 확인되는 기능은 적극적으로 설계 문장으로 정리하세요.\n- HWP 추출 제한 문구가 본문을 지배하지 않게 하세요.\n- 요구사항 추적성 매트릭스, 사이버보안, PDF 산출물 필드 매핑, 데이터 모델을 반드시 유지/강화하세요.\n\n1단계 분석 결과:\n${JSON.stringify(slimAnalysisBundle(analysisBundle), null, 2).slice(0, 50000)}\n\n현재 초안 JSON:\n${draftJson}`;
   try {
@@ -1799,8 +2035,8 @@ async function generateDocumentArchitecture() {
     state.project.document_profile = currentDocumentProfile();
 
     let draft;
-    if (state.settings.gemini_api_key) {
-      state.status = "Gemini API로 문서 전체 구성 아키텍처를 설계하는 중입니다.";
+    if (currentAiKey()) {
+      state.status = "AI API로 문서 전체 구성 아키텍처를 설계하는 중입니다.";
       render();
       try {
         draft = await generateArchitectureWithGemini(parsedFiles, referenceFiles);
@@ -1821,7 +2057,7 @@ async function generateDocumentArchitecture() {
 }
 
 async function generateArchitectureWithGemini(files, referenceFiles = []) {
-  const model = state.settings.gemini_model || DEFAULT_MODEL;
+  const model = state.settings.gemini_model || DEFAULT_GEMINI_MODEL;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.gemini_api_key)}`;
   const sourceText = buildGeminiSourceText(referenceFiles, files);
   const profile = currentDocumentProfile();
@@ -1845,7 +2081,7 @@ async function generateArchitectureWithGemini(files, referenceFiles = []) {
 
     if (!response.ok) {
       const payload = await response.json().catch(() => null);
-      const message = payload?.error?.message || `Gemini API 호출 실패: HTTP ${response.status}`;
+      const message = payload?.error?.message || `AI API 호출 실패: HTTP ${response.status}`;
       throw new Error(message);
     }
 
@@ -1979,7 +2215,7 @@ function buildArchitectureEvidenceRows(files) {
   });
 }
 
-async function generateDraftWithGemini(files, referenceFiles = [], analysisBundle = null) {
+async function generateDraftWithAi(files, referenceFiles = [], analysisBundle = null) {
   const sourceText = buildGeminiSourceText(referenceFiles, files);
   const profile = currentDocumentProfile();
   const inventory = buildArtifactInventory(files, referenceFiles);
@@ -2009,46 +2245,28 @@ async function generateDraftWithGemini(files, referenceFiles = [], analysisBundl
 }
 
 async function improveDraftWithGemini(draft) {
-  const model = state.settings.gemini_model || DEFAULT_MODEL;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(state.settings.gemini_api_key)}`;
   const sourceSummary = (state.project?.files || [])
     .map(file => `- ${file.filename} (${file.extension}, ${formatBytes(file.size)}): ${file.summary || "요약 없음"}`)
-    .join("\n");
+    .join("\\n");
   const profile = currentDocumentProfile();
   const draftJson = JSON.stringify(draft).slice(0, MAX_GEMINI_INPUT_CHARS);
   const prompt = buildDraftImprovementPrompt(draftJson, profile, sourceSummary);
 
   let lastError = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: attempt === 1 ? prompt : `${prompt}\n\n재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 설명 없이 유효한 JSON 객체만 반환하세요. 마크다운 코드펜스 금지. 마지막 문자는 반드시 } 이어야 합니다.` }] }],
-        generationConfig: {
-          temperature: attempt === 1 ? 0.15 : 0.05,
-          maxOutputTokens: 16384,
-          responseMimeType: "application/json",
-        },
-      }),
-    });
-
-    if (!response.ok) {
-      const payload = await response.json().catch(() => null);
-      const message = payload?.error?.message || `Gemini API 호출 실패: HTTP ${response.status}`;
-      throw new Error(message);
-    }
-
-    const payload = await response.json();
-    const text = payload?.candidates?.[0]?.content?.parts?.map(part => part.text || "").join("\n");
-    if (!text) throw new Error("Gemini 응답이 비어 있습니다.");
     try {
-      return parseDraftJson(text);
+      return await callGeminiJson(prompt, {
+        files: state.project?.files || [],
+        maxImages: 0,
+        temperature: attempt === 1 ? 0.15 : 0.05,
+        maxOutputTokens: 16384,
+        retryInstruction: attempt === 1 ? "" : "재시도 지시: 이전 응답은 JSON 파싱에 실패했습니다. 설명 없이 유효한 JSON 객체만 반환하세요. 마크다운 코드펜스 금지. 마지막 문자는 반드시 } 이어야 합니다.",
+      });
     } catch (error) {
       lastError = error;
     }
   }
-  throw lastError || new Error("Gemini 응답 JSON 파싱에 실패했습니다.");
+  throw lastError || new Error(`${currentAiProviderLabel()} 응답 JSON 파싱에 실패했습니다.`);
 }
 
 function buildDraftImprovementPrompt(draftJson, profile, sourceSummary) {
@@ -2600,22 +2818,22 @@ async function saveDraft() {
   const title = document.getElementById("draft-title")?.value?.trim();
   if (title) state.project.draft.title = title;
 
-  if (!state.settings.gemini_api_key) {
+  if (!currentAiKey()) {
     state.project.updated_at = new Date().toISOString();
     persistProject();
-    state.status = "초안이 이 브라우저에 저장되었습니다. Gemini API Key가 없어서 자동 보완은 실행하지 않았습니다.";
+    state.status = "초안이 이 브라우저에 저장되었습니다. AI API Key가 없어서 자동 보완은 실행하지 않았습니다.";
     pushToast("success", "저장 완료", state.status);
     render();
     return;
   }
 
-  await withStatus("Gemini가 편집 내용을 검토하고 보완하는 중입니다.", async () => {
+  await withStatus(`${currentAiProviderLabel()}가 편집 내용을 검토하고 보완하는 중입니다.`, async () => {
     try {
       const improvedDraft = await improveDraftWithGemini(state.project.draft);
       state.project.draft = normalizeDraft(improvedDraft, state.project.draft.title || state.project.title || "인허가 문서 초안");
       state.project.updated_at = new Date().toISOString();
       persistProject();
-      state.status = "Gemini가 편집 내용을 보완하고 저장했습니다.";
+      state.status = `${currentAiProviderLabel()}가 편집 내용을 보완하고 저장했습니다.`;
     } catch (error) {
       console.warn("Gemini draft improvement failed; saved current draft", error);
       state.project.updated_at = new Date().toISOString();
@@ -2879,9 +3097,14 @@ function persistProject(showWarning = true) {
 function loadSettingsFromStorage() {
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_SETTINGS) || "{}");
+    const migratedModel = saved.gemini_model || DEFAULT_GEMINI_MODEL;
+    const migratedOpenAiModel = saved.openai_model || DEFAULT_OPENAI_MODEL;
     return {
+      ai_provider: saved.ai_provider || DEFAULT_PROVIDER,
       gemini_api_key: saved.gemini_api_key || "",
-      gemini_model: saved.gemini_model || DEFAULT_MODEL,
+      gemini_model: migratedModel,
+      openai_api_key: saved.openai_api_key || "",
+      openai_model: migratedOpenAiModel,
       document_mode: saved.document_mode || DEFAULT_DOCUMENT_MODE,
       pipeline_mode: saved.pipeline_mode || "high_quality",
       product_name: saved.product_name || "",
@@ -2891,14 +3114,18 @@ function loadSettingsFromStorage() {
       intended_use: saved.intended_use || "",
     };
   } catch {
-    return { gemini_api_key: "", gemini_model: DEFAULT_MODEL, document_mode: DEFAULT_DOCUMENT_MODE, pipeline_mode: "high_quality", product_name: "", software_version: "", target_hardware: "", target_regulator: "", intended_use: "" };
+    return { ai_provider: DEFAULT_PROVIDER, gemini_api_key: "", gemini_model: DEFAULT_GEMINI_MODEL, openai_api_key: "", openai_model: DEFAULT_OPENAI_MODEL, document_mode: DEFAULT_DOCUMENT_MODE, pipeline_mode: "high_quality", product_name: "", software_version: "", target_hardware: "", target_regulator: "", intended_use: "" };
   }
 }
 
 function saveSettingsToStorage(settings) {
   localStorage.setItem(STORAGE_SETTINGS, JSON.stringify({
+    ai_provider: settings.ai_provider || DEFAULT_PROVIDER,
     gemini_api_key: settings.gemini_api_key || "",
-    gemini_model: settings.gemini_model || DEFAULT_MODEL,
+    gemini_model: settings.gemini_model || DEFAULT_GEMINI_MODEL,
+    openai_api_key: settings.openai_api_key || "",
+    openai_model: settings.openai_model || DEFAULT_OPENAI_MODEL,
+    model_selection_version: "provider-select-gpt-20260528",
     document_mode: settings.document_mode || DEFAULT_DOCUMENT_MODE,
     pipeline_mode: settings.pipeline_mode || "high_quality",
     product_name: settings.product_name || "",

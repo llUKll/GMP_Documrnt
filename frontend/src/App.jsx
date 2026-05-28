@@ -297,9 +297,9 @@ function App() {
           />
           <label className="label" htmlFor="gemini-model">Gemini 모델 선택</label>
           <select id="gemini-model" value={geminiModel} onChange={(event) => setGeminiModel(event.target.value)}>
-            <option value="gemini-2.5-pro">gemini-2.5-pro · 상세설계/인허가 문서 권장</option>
+            <option value="gemini-2.5-pro">gemini-2.5-pro · 최고품질 / 이미지 분석·상세설계 권장</option>
             <option value="gemini-2.5-flash">gemini-2.5-flash · 속도/품질 균형</option>
-            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite · 간단 요약/저비용</option>
+            <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite · 간단 요약 / 저비용</option>
           </select>
           <button onClick={saveSettings} disabled={busy}>Gemini 설정 저장</button>
           <small>{settings.has_gemini_api_key ? "Gemini 분석이 켜져 있습니다." : "키가 없으면 로컬 분석기로 생성합니다."}</small>

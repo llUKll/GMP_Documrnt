@@ -14,7 +14,7 @@ function App() {
   const [settings, setSettings] = useState({ has_gemini_api_key: false, gemini_model: "gemini-2.5-flash-lite" });
   const [limits, setLimits] = useState({
     supported_extensions: [".docx", ".pdf", ".xlsx"],
-    max_files_per_project: 5,
+    max_files_per_project: 10,
     max_file_size_bytes: 20 * 1024 * 1024,
     max_file_size_label: "20MB",
   });
@@ -452,7 +452,7 @@ function Editor({ draft, onSave }) {
           />
           <p className="helper-text">다운로드될 Word 문서의 파일명과 첫 제목으로 사용됩니다.</p>
         </div>
-        <button className="save-button" onClick={persist}>{saving ? "저장 중" : "저장"}</button>
+        <button className="save-button" onClick={persist}>{saving ? "검토 중" : "검토 및 저장"}</button>
       </header>
 
       <div className="paper">

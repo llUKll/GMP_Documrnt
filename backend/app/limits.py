@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 SUPPORTED_EXTENSIONS = {".xlsx", ".docx", ".pdf"}
-MAX_FILES_PER_PROJECT = 5
+MAX_FILES_PER_PROJECT = 10
 MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024
 
 

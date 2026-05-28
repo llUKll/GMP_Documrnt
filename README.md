@@ -39,4 +39,9 @@ Gemini API Key는 서버가 아니라 현재 브라우저 localStorage에 저장
 
 ## 다운로드 형식
 
-초안 생성 후 Word(.docx), PowerPoint(.pptx), PDF(.pdf) 중 선택해 다운로드할 수 있습니다. PDF는 GitHub Pages 정적 모드에서 브라우저 렌더링 기반으로 생성됩니다.
+초안 생성 후 다운로드 산출물과 파일 형식을 각각 선택할 수 있습니다.
+
+- 다운로드 산출물: 최종 상세설계 문서, 1단계 분석 결과, 2단계 설계 생성 결과, 분석+설계 통합 문서
+- 다운로드 형식: Word(.docx), PowerPoint(.pptx), PDF(.pdf)
+
+PDF는 GitHub Pages 정적 모드에서 브라우저 렌더링 기반으로 생성됩니다.

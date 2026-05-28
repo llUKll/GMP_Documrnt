@@ -188,12 +188,19 @@ function render() {
 
           <button id="analyze" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>2단계 분석 및 상세설계 생성</button>
           <div class="download-format-row">
+            <select id="download-content" aria-label="다운로드 산출물 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
+              <option value="final">최종 상세설계 문서</option>
+              <option value="analysis">1단계 분석 결과</option>
+              <option value="design">2단계 설계 생성 결과</option>
+              <option value="combined">분석+설계 통합 문서</option>
+            </select>
             <select id="download-format" aria-label="다운로드 형식 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
               <option value="docx">Word 문서(.docx)</option>
               <option value="pptx">PowerPoint(.pptx)</option>
               <option value="pdf">PDF 문서(.pdf)</option>
             </select>
-            <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>선택 형식 다운로드</button>
+            <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>선택 산출물 다운로드</button>
+            <small>최종 문서뿐 아니라 1단계 분석 결과, 2단계 설계 생성 결과, 통합본을 선택해 DOCX/PPTX/PDF로 다운로드할 수 있습니다.</small>
           </div>
         </section>
 
@@ -2852,25 +2859,249 @@ async function saveDraft() {
 }
 
 
+
+function getDownloadMode() {
+  return document.getElementById("download-content")?.value || "final";
+}
+
+function getDownloadModeLabel(mode = getDownloadMode()) {
+  return {
+    final: "최종 상세설계 문서",
+    analysis: "1단계 분석 결과",
+    design: "2단계 설계 생성 결과",
+    combined: "분석+설계 통합 문서",
+  }[mode] || "최종 상세설계 문서";
+}
+
+function getDownloadDraft() {
+  const mode = getDownloadMode();
+  if (!state.project?.draft) return null;
+  if (mode === "analysis") return buildAnalysisDownloadDraft();
+  if (mode === "design") return buildDesignDownloadDraft();
+  if (mode === "combined") return buildCombinedDownloadDraft();
+  return state.project.draft;
+}
+
+function downloadFileBaseName(draft) {
+  const mode = getDownloadMode();
+  const suffix = {
+    final: "최종상세설계",
+    analysis: "1단계분석결과",
+    design: "2단계설계생성",
+    combined: "분석설계통합본",
+  }[mode] || "문서";
+  return sanitizeFileName(`${draft?.title || state.project?.title || "document-insight"}_${suffix}`);
+}
+
+function buildAnalysisDownloadDraft() {
+  const bundle = state.project?.analysis_bundle || {};
+  const files = state.project?.files || [];
+  const referenceFiles = state.project?.reference_files || [];
+  const profile = state.project?.document_profile || currentDocumentProfile();
+  const blocks = [];
+  addBlock(blocks, "heading", { level: 1, text: "1단계 첨부자료 분석 결과" });
+  addBlock(blocks, "paragraph", { text: `본 문서는 최종 상세설계파일을 작성하기 전에 참조문서, 첨부 ZIP, 화면 이미지, PDF 산출물, 소스/설정 후보를 분류한 1단계 분석 결과이다. 선택 AI: ${currentAiProviderLabel()} / ${currentAiModel()}.` });
+  addBlock(blocks, "table", { caption: "분석 기본 정보", headers: ["항목", "내용"], rows: [
+    ["제품명", profile.product_name || "[확인 필요]"],
+    ["소프트웨어", profile.software_name || state.project?.title || "[확인 필요]"],
+    ["SW 버전", profile.software_version || "[확인 필요]"],
+    ["대상 장비", profile.target_hardware || "[확인 필요]"],
+    ["생성 모드", state.settings.pipeline_mode || "high_quality"],
+    ["품질 점수", bundle.quality_score ? `${bundle.quality_score}/100` : "생성 전/미산정"],
+  ]});
+  const inventoryRows = buildInventoryRows(bundle, files, referenceFiles);
+  addBlock(blocks, "heading", { level: 2, text: "1. 첨부자료 인벤토리" });
+  addBlock(blocks, "table", { caption: "첨부자료 인벤토리", headers: ["구분", "파일/근거", "유형", "설계 활용"], rows: inventoryRows });
+  const screenRows = buildScreenMapRows(bundle, files);
+  addBlock(blocks, "heading", { level: 2, text: "2. 화면/이미지 기능 매핑" });
+  addBlock(blocks, "table", { caption: "화면/이미지 기능 매핑", headers: ["화면/이미지", "기능 분류", "주요 UI/데이터", "SDD/SDS 반영 위치"], rows: screenRows });
+  const zipRows = buildZipEvidenceRows(files);
+  if (zipRows.length) {
+    addBlock(blocks, "heading", { level: 2, text: "3. ZIP 내부 근거 요약" });
+    addBlock(blocks, "table", { caption: "ZIP 내부 근거 요약", headers: ["ZIP", "총 파일", "문서 후보", "코드/설정 후보", "이미지/영상 후보"], rows: zipRows });
+  }
+  addBlock(blocks, "heading", { level: 2, text: "4. 대표 증거 이미지" });
+  appendEvidenceImageBlocks(blocks, files, 8);
+  return normalizeDraft({ title: `${state.project?.title || "IBEX"} 1단계 분석 결과`, blocks }, "1단계 분석 결과");
+}
+
+function buildDesignDownloadDraft() {
+  const original = state.project?.draft || { title: state.project?.title || "문서 초안", blocks: [] };
+  const blocks = [];
+  addBlock(blocks, "heading", { level: 1, text: "2단계 S/W 상세설계 생성 결과" });
+  addBlock(blocks, "paragraph", { text: "본 문서는 1단계 첨부자료 분석 결과를 바탕으로 생성된 S/W 아키텍처, SDD, SDS, 데이터 모델, 상태 전이, 보고서 산출물, 검증 포인트 중심의 2단계 설계 생성 결과이다." });
+  const selected = selectDesignBlocks(original.blocks || []);
+  if (selected.length) {
+    selected.forEach(block => addExistingBlock(blocks, block));
+  } else {
+    addDesignFallbackBlocks(blocks);
+  }
+  addBlock(blocks, "heading", { level: 2, text: "설계 근거 이미지" });
+  appendEvidenceImageBlocks(blocks, state.project?.files || [], 8);
+  return normalizeDraft({ title: `${state.project?.title || "IBEX"} 2단계 설계 생성 결과`, blocks }, "2단계 설계 생성 결과");
+}
+
+function buildCombinedDownloadDraft() {
+  const analysis = buildAnalysisDownloadDraft();
+  const design = buildDesignDownloadDraft();
+  const blocks = [];
+  addBlock(blocks, "heading", { level: 1, text: "분석 및 설계 생성 통합본" });
+  addBlock(blocks, "paragraph", { text: "본 문서는 1단계 첨부자료 분석 결과와 2단계 S/W 상세설계 생성 결과를 통합한 다운로드용 산출물이다. 최종 제출용 문서와 달리 분석 근거와 설계 생성 내용을 함께 검토할 수 있도록 구성하였다." });
+  for (const block of analysis.blocks || []) addExistingBlock(blocks, block);
+  for (const block of design.blocks || []) addExistingBlock(blocks, block);
+  return normalizeDraft({ title: `${state.project?.title || "IBEX"} 분석 및 설계 생성 통합본`, blocks }, "분석 및 설계 생성 통합본");
+}
+
+function buildInventoryRows(bundle, files, referenceFiles) {
+  const rows = [];
+  (referenceFiles || []).forEach(file => rows.push(["참조파일", file.filename || file.name || "참조파일", file.extension || "문서", "목차/문체/표 구성/인허가 양식 기준"]));
+  (files || []).forEach(file => rows.push(["첨부파일", file.filename || file.name || "첨부파일", file.extension || "자료", summarizeFileUse(file)]));
+  (bundle.inventory || []).slice(0, 40).forEach(item => rows.push([
+    item.category || item.type || "분류 결과",
+    item.filename || item.name || item.path || "근거 항목",
+    item.kind || item.file_type || item.extension || "-",
+    item.design_use || item.use || item.summary || "설계 근거로 검토",
+  ]));
+  return rows.length ? rows.slice(0, 80) : [["첨부자료", "분석 가능한 파일", "-", "근거 분류 필요"]];
+}
+
+function buildScreenMapRows(bundle, files) {
+  const rows = [];
+  (bundle.screen_map || []).forEach(item => rows.push([
+    item.screen || item.screen_name || item.filename || item.name || "화면 근거",
+    item.category || item.function || item.feature || "화면/기능 분류",
+    Array.isArray(item.ui_elements) ? item.ui_elements.join(", ") : (item.ui_elements || item.key_elements || item.summary || "주요 UI 요소 확인 필요"),
+    item.sdd_sds_link || item.design_section || item.section || "4장/5장 SDD·SDS 반영",
+  ]));
+  if (!rows.length) {
+    collectEvidenceImages(files || []).slice(0, 20).forEach(asset => rows.push([
+      asset.name || asset.filename || "이미지",
+      inferImageCategory(asset.name || asset.filename || ""),
+      asset.caption || "ZIP 내부 화면 이미지",
+      "4.1.1 UI / 5.2 Module Design Specification",
+    ]));
+  }
+  return rows.length ? rows : [["화면 이미지", "분류 필요", "대표 이미지 없음", "4장/5장"]];
+}
+
+function summarizeFileUse(file) {
+  const ext = String(file.extension || "").toLowerCase();
+  if (ext === ".zip") return "ZIP 내부 문서/코드/이미지/보고서 근거 추출";
+  if ([".png", ".jpg", ".jpeg", ".webp"].includes(ext)) return "화면 증거 이미지 및 UI 설계 근거";
+  if (ext === ".pdf") return "보고서 산출물/운영로그/검증 근거";
+  if ([".kt", ".java", ".xml", ".gradle", ".kts"].includes(ext)) return "구현 모듈/권한/레이아웃/API 설계 근거";
+  return "문서/텍스트 근거";
+}
+
+function inferImageCategory(name) {
+  const lower = String(name || "").toLowerCase();
+  if (/login|로그인/.test(lower)) return "로그인/접근 제어";
+  if (/patient|환자/.test(lower)) return "환자정보 관리";
+  if (/profile|프로파일/.test(lower)) return "프로파일 선택/편집";
+  if (/run|treat|치료|운전/.test(lower)) return "치료 운전";
+  if (/log|record|기록|운영/.test(lower)) return "치료기록/운영로그";
+  if (/report|pdf|보고서/.test(lower)) return "보고서 미리보기/내보내기";
+  return "화면 증거";
+}
+
+function selectDesignBlocks(blocks) {
+  const ordered = [...(blocks || [])].sort((a, b) => a.order - b.order);
+  const selected = [];
+  let include = false;
+  for (const block of ordered) {
+    const text = blockText(block);
+    if (/S\/W\s*아키텍처|Software Architecture|S\/W\s*설계\s*기술서|Software Design Description|S\/W\s*설계\s*명세서|Software Design Specification|Operation Part|Auto-Control|데이터 모델|산출물 상세|Module Design Specification|프로파일 선택|환자정보 관리|보고서 생성|예외처리|검증 포인트/i.test(text)) {
+      include = true;
+    }
+    if (/인허가·사이버보안|사이버보안|요구사항 추적성|첨부자료 분석 결과|제출 전 보완/i.test(text) && selected.length > 0 && block.type === "heading") {
+      include = false;
+    }
+    if (include && block.type !== "image") selected.push(block);
+  }
+  return selected.slice(0, 80);
+}
+
+function addDesignFallbackBlocks(blocks) {
+  addBlock(blocks, "heading", { level: 2, text: "3. S/W 아키텍처 설계도" });
+  addBlock(blocks, "paragraph", { text: "사용자 인터페이스 계층, 애플리케이션 로직 계층, 데이터 저장 계층, 보고서 생성 계층, 네트워크/장비 인터페이스 계층으로 구성한다." });
+  addBlock(blocks, "heading", { level: 2, text: "4. S/W 설계 기술서" });
+  addBlock(blocks, "table", { caption: "화면별 SDD 설계 항목", headers: ["화면", "입력", "처리", "출력", "검증 포인트"], rows: [
+    ["로그인", "사용자 입력", "접근 권한 확인", "초기 화면 진입", "비인가 접근 제한"],
+    ["환자관리", "환자번호/환자정보", "조회/등록/수정/삭제", "Patient 레코드", "중복/누락 검증"],
+    ["프로파일", "시간/압력 구간", "프로파일 유효성 검증", "Profile 레코드", "최대압력/상승률 검증"],
+    ["치료운전", "센서/상태/사용자 명령", "상태 전이 및 차트 표시", "세션/이벤트 로그", "안전상태/통신장애 처리"],
+    ["보고서", "세션/로그 데이터", "PDF/DOCX/PPTX 산출", "보고서 파일", "원자료와 산출물 일치성"],
+  ]});
+  addBlock(blocks, "heading", { level: 2, text: "5. S/W 설계 명세서" });
+  addBlock(blocks, "table", { caption: "모듈별 SDS 설계 항목", headers: ["모듈 ID", "모듈", "입력", "처리", "예외처리"], rows: [
+    ["SDS-UI-001", "로그인", "ID/PW 또는 시작 이벤트", "권한 확인 및 화면 전환", "실패/중복 클릭 차단"],
+    ["SDS-PAT-001", "환자관리", "환자번호/인적정보", "환자 DB 조회 및 저장", "미등록/중복/삭제 확인"],
+    ["SDS-PF-001", "프로파일 관리", "프로파일 구간", "검증 후 저장", "범위 초과/마지막 압력 미복귀"],
+    ["SDS-RUN-001", "치료 운전", "프로파일/센서/명령", "상태 전이 및 세션 기록", "통신 장애/센서 이상"],
+    ["SDS-REP-001", "보고서 생성", "세션/로그 데이터", "문서 산출물 생성", "생성 실패/누락 데이터"],
+  ]});
+}
+
+function blockText(block) {
+  const content = block?.content || {};
+  if (block?.type === "heading") return content.text || "";
+  if (block?.type === "paragraph") return content.text || "";
+  if (block?.type === "table") return `${content.caption || ""} ${(content.headers || []).join(" ")} ${(content.rows || []).flat().join(" ")}`;
+  if (block?.type === "diagram") return `${content.title || ""} ${content.code || ""}`;
+  if (block?.type === "chart") return content.title || "";
+  return JSON.stringify(content || {});
+}
+
+function addBlock(blocks, type, content) {
+  blocks.push({ id: makeId("download_block"), type, order: blocks.length, content });
+}
+
+function addExistingBlock(blocks, block) {
+  blocks.push({ ...JSON.parse(JSON.stringify(block)), id: makeId("download_block"), order: blocks.length });
+}
+
+function appendEvidenceImageBlocks(blocks, files, maxImages = 8) {
+  const assets = collectEvidenceImages(files || []).slice(0, maxImages);
+  if (!assets.length) {
+    addBlock(blocks, "paragraph", { text: "첨부 ZIP 내부에서 다운로드 문서에 삽입 가능한 대표 이미지 데이터가 확인되지 않았다." });
+    return;
+  }
+  assets.forEach((asset, index) => {
+    addBlock(blocks, "image", {
+      caption: `증거 이미지 ${index + 1}. ${asset.caption || asset.name || asset.filename || "화면 이미지"}`,
+      alt: asset.caption || asset.name || asset.filename || "증거 이미지",
+      source: asset.source || asset.name || asset.filename || "첨부 ZIP",
+      filename: asset.name || asset.filename || `evidence-${index + 1}.jpg`,
+      dataUrl: asset.dataUrl || "",
+      width: Number(asset.width || asset.originalWidth || 1200),
+      height: Number(asset.height || asset.originalHeight || 800),
+      originalWidth: Number(asset.originalWidth || asset.width || 1200),
+      originalHeight: Number(asset.originalHeight || asset.height || 800),
+    });
+  });
+}
+
 function downloadSelectedFormat() {
   const format = document.getElementById("download-format")?.value || "docx";
-  if (format === "pptx") return downloadPptx();
-  if (format === "pdf") return downloadPdf();
-  return downloadDocx();
+  const draft = getDownloadDraft();
+  if (!draft) return;
+  if (format === "pptx") return downloadPptx(draft);
+  if (format === "pdf") return downloadPdf(draft);
+  return downloadDocx(draft);
 }
 
 
-async function downloadPdf() {
-  if (!state.project?.draft) return;
-  await withStatus("PDF 문서를 생성하는 중입니다.", async () => {
+async function downloadPdf(draft = getDownloadDraft()) {
+  if (!draft) return;
+  await withStatus(`${getDownloadModeLabel()} PDF 문서를 생성하는 중입니다.`, async () => {
     const JsPdfCtor = resolveJsPdfConstructor();
     ensureLibrary(JsPdfCtor, "jsPDF");
     ensureLibrary(window.html2canvas, "html2canvas");
-    const pdf = await buildPdfFromDraft(state.project.draft, JsPdfCtor);
-    const fileName = `${sanitizeFileName(state.project.draft.title || "document-insight")}.pdf`;
+    const pdf = await buildPdfFromDraft(draft, JsPdfCtor);
+    const fileName = `${downloadFileBaseName(draft)}.pdf`;
     pdf.save(fileName);
-    state.status = "PDF 다운로드를 시작했습니다.";
-  }, "PDF 다운로드를 시작했습니다.");
+    state.status = `${getDownloadModeLabel()} PDF 다운로드를 시작했습니다.`;
+  }, `${getDownloadModeLabel()} PDF 다운로드를 시작했습니다.`);
 }
 
 function resolveJsPdfConstructor() {
@@ -3073,16 +3304,16 @@ function waitForImages(element) {
   }));
 }
 
-async function downloadPptx() {
-  if (!state.project?.draft) return;
-  await withStatus("PowerPoint 문서를 생성하는 중입니다.", async () => {
+async function downloadPptx(draft = getDownloadDraft()) {
+  if (!draft) return;
+  await withStatus(`${getDownloadModeLabel()} PowerPoint 문서를 생성하는 중입니다.`, async () => {
     const PptxCtor = resolvePptxConstructor();
     ensureLibrary(PptxCtor, "PptxGenJS");
-    const pptx = buildPptxFromDraft(state.project.draft, PptxCtor);
-    const fileName = `${sanitizeFileName(state.project.draft.title || "document-insight")}.pptx`;
+    const pptx = buildPptxFromDraft(draft, PptxCtor);
+    const fileName = `${downloadFileBaseName(draft)}.pptx`;
     await pptx.writeFile({ fileName });
-    state.status = "PowerPoint 다운로드를 시작했습니다.";
-  }, "PowerPoint 다운로드를 시작했습니다.");
+    state.status = `${getDownloadModeLabel()} PowerPoint 다운로드를 시작했습니다.`;
+  }, `${getDownloadModeLabel()} PowerPoint 다운로드를 시작했습니다.`);
 }
 
 function resolvePptxConstructor() {
@@ -3212,21 +3443,21 @@ function pptImageBox(widthPx, heightPx, maxW, maxH) {
   return { w, h, x: (maxW - w) / 2, y: (maxH - h) / 2 };
 }
 
-async function downloadDocx() {
-  if (!state.project?.draft) return;
-  await withStatus("Word 문서를 생성하는 중입니다.", async () => {
+async function downloadDocx(draft = getDownloadDraft()) {
+  if (!draft) return;
+  await withStatus(`${getDownloadModeLabel()} Word 문서를 생성하는 중입니다.`, async () => {
     ensureLibrary(window.JSZip, "JSZip");
-    const blob = await buildDocxBlob(state.project.draft);
+    const blob = await buildDocxBlob(draft);
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `${sanitizeFileName(state.project.draft.title || "document-insight")}.docx`;
+    link.download = `${downloadFileBaseName(draft)}.docx`;
     document.body.appendChild(link);
     link.click();
     link.remove();
     URL.revokeObjectURL(url);
-    state.status = "Word 다운로드를 시작했습니다.";
-  }, "Word 다운로드를 시작했습니다.");
+    state.status = `${getDownloadModeLabel()} Word 다운로드를 시작했습니다.`;
+  }, `${getDownloadModeLabel()} Word 다운로드를 시작했습니다.`);
 }
 
 async function buildDocxBlob(draft) {

@@ -159,7 +159,7 @@ function render() {
             <option value="single_pass" ${(state.settings.pipeline_mode || "high_quality") === "single_pass" ? "selected" : ""}>단일 생성</option>
           </select>
           <button id="save-settings" type="button" ${state.busy ? "disabled" : ""}>AI 설정 저장</button>
-          <small>${currentAiKey() ? `${currentAiProviderLabel()} / ${currentAiModel()} 사용 중입니다. 선택한 모델만 사용하며 자동 하위 모델 전환은 하지 않습니다. API Key는 이 브라우저 localStorage에만 저장됩니다.` : "선택한 제공자의 API Key가 없으면 이미지 해석 없는 로컬 SDF 템플릿으로 초안을 생성합니다."}</small>
+          <small>${currentAiKey() ? `${currentAiProviderLabel()} / ${currentAiModel()} 사용 중입니다. 선택한 모델만 사용하며 자동 하위 모델 전환은 하지 않습니다. API Key는 이 브라우저 localStorage에만 저장됩니다.` : "선택한 제공자의 API Key가 없으면 생성이 중단됩니다. 로컬 대체 생성은 사용하지 않습니다."}</small>
           <small>주의: GitHub Pages 정적 모드에서는 API Key를 브라우저에 저장해 직접 호출합니다. 사내/상용 배포에서는 백엔드 프록시 사용을 권장합니다.</small>
         </section>
 
@@ -187,7 +187,14 @@ function render() {
           <div id="drop-zone" class="drop-zone">파일을 여기에 드래그하거나 파일 선택을 누르세요.</div>
 
           <button id="analyze" ${state.project?.files?.length && !state.busy ? "" : "disabled"}>2단계 분석 및 상세설계 생성</button>
-          <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>Word 다운로드</button>
+          <div class="download-format-row">
+            <select id="download-format" aria-label="다운로드 형식 선택" ${state.project?.draft && !state.busy ? "" : "disabled"}>
+              <option value="docx">Word 문서(.docx)</option>
+              <option value="pptx">PowerPoint(.pptx)</option>
+              <option value="pdf">PDF 문서(.pdf)</option>
+            </select>
+            <button id="download" ${state.project?.draft && !state.busy ? "" : "disabled"}>선택 형식 다운로드</button>
+          </div>
         </section>
 
         ${state.project ? `
@@ -527,7 +534,7 @@ function bindEvents() {
     uploadFileList(Array.from(event.dataTransfer.files || []));
   });
   document.getElementById("analyze")?.addEventListener("click", analyzeProject);
-  document.getElementById("download")?.addEventListener("click", downloadDocx);
+  document.getElementById("download")?.addEventListener("click", downloadSelectedFormat);
   document.getElementById("save-draft")?.addEventListener("click", saveDraft);
   document.getElementById("copy-share")?.addEventListener("click", copyTeamShareLink);
   document.getElementById("clear-files")?.addEventListener("click", clearProjectAttachments);
@@ -905,7 +912,7 @@ function saveSettings() {
   saveSettingsToStorage(state.settings);
   state.status = currentAiKey()
     ? `설정이 저장되었습니다. ${currentAiProviderLabel()} ${currentAiModel()} 모델로 인허가 문서 생성 스킬이 적용됩니다.`
-    : "설정이 저장되었습니다. 선택한 제공자의 키가 없으면 인허가 체크리스트 기반 로컬 초안으로 생성합니다.";
+    : "설정이 저장되었습니다. 선택한 제공자의 키가 없으면 생성이 중단됩니다.";
   pushToast("success", "저장 완료", state.status);
   render();
 }
@@ -1537,7 +1544,11 @@ async function analyzeProject() {
     state.project.analysis_bundle = analysisBundle;
     persistProject(false);
 
-    if (currentAiKey() && regulatoryMode && mode !== "single_pass") {
+    if (!currentAiKey()) {
+      throw new Error(`${currentAiProviderLabel()} API Key가 없어 생성을 중단했습니다. AI 설정에 API Key를 저장한 뒤 다시 실행하세요.`);
+    }
+
+    if (regulatoryMode && mode !== "single_pass") {
       state.status = `1/4 ${currentAiProviderLabel()}가 ZIP 내부 이미지와 파일 목록을 화면/기능별로 분류하는 중입니다.`;
       render();
       try {
@@ -1546,13 +1557,13 @@ async function analyzeProject() {
         state.project.analysis_bundle = analysisBundle;
         persistProject(false);
       } catch (error) {
-        console.warn("AI evidence map failed; keep local analysis", error);
-        pushToast("error", "1단계 분석 보정", `${summarizeAiError(error)} 로컬 근거 맵으로 계속 진행합니다.`, false);
+        console.warn("AI evidence map failed; generation stopped", error);
+        throw new Error(`1단계 분석 실패로 생성을 중단했습니다. ${summarizeAiError(error)}`);
       }
     }
 
     let draft;
-    if (currentAiKey()) {
+    {
       state.status = regulatoryMode
         ? `2/4 ${currentAiProviderLabel()}가 SDD/SDS 상세설계 본문을 작성하는 중입니다.`
         : `${currentAiProviderLabel()} API로 일반 보고서 초안을 생성하는 중입니다.`;
@@ -1565,15 +1576,12 @@ async function analyzeProject() {
           draft = await reviewRegulatoryDraftWithAi(draft, parsedFiles, referenceFiles, analysisBundle);
         }
       } catch (error) {
-        console.warn("AI generation failed; fallback to local draft", error);
-        pushToast("error", `${currentAiProviderLabel()} 응답 보정 실패`, `${summarizeAiError(error)} 로컬 SDF 초안으로 대체합니다.`, false);
-        draft = generateLocalDraft(parsedFiles, summarizeAiError(error), referenceFiles);
+        console.warn("AI generation failed; generation stopped", error);
+        throw new Error(`${currentAiProviderLabel()} 응답 실패로 생성을 중단했습니다. ${summarizeAiError(error)}`);
       }
-    } else {
-      draft = generateLocalDraft(parsedFiles, "", referenceFiles);
     }
 
-    state.status = regulatoryMode ? "4/4 화면 이미지와 근거표를 DOCX 본문에 배치하는 중입니다." : "초안 후처리 중입니다.";
+    state.status = regulatoryMode ? "4/4 화면 이미지와 근거표를 문서 본문에 배치하는 중입니다." : "초안 후처리 중입니다.";
     render();
     draft = reinforceDraftWithAnalysis(draft, analysisBundle, parsedFiles, referenceFiles);
     draft = attachEvidenceImagesToDraft(draft, parsedFiles);
@@ -1586,7 +1594,7 @@ async function analyzeProject() {
     persistProject();
     state.status = regulatoryMode
       ? `S/W 상세설계파일 초안이 생성되었습니다. 품질 점수 ${score}/100 기준으로 [확인 필요] 항목을 검토하세요.`
-      : "보고서 초안이 생성되었습니다. 화면에서 수정 후 Word로 다운로드하세요.";
+      : "보고서 초안이 생성되었습니다. 화면에서 수정 후 원하는 형식으로 다운로드하세요.";
   }, "상세설계 초안이 생성되었습니다.");
 }
 
@@ -1959,8 +1967,7 @@ async function reviewRegulatoryDraftWithAi(draft, files, referenceFiles = [], an
     const reviewed = await callGeminiJson(prompt, { files, maxImages: 0, temperature: 0.08, maxOutputTokens: 24576 });
     return ensureRegulatoryDraftQuality(reviewed, files, referenceFiles, "Gemini 최종 검토 결과가 품질 기준에 미달하여 보정");
   } catch (error) {
-    pushToast("error", "최종 검토 보정 실패", `${error.message} 1차 초안으로 계속 진행합니다.`, false);
-    return draft;
+    throw new Error(`최종 검토 단계 실패로 생성을 중단했습니다. ${summarizeAiError(error)}`);
   }
 }
 
@@ -2844,6 +2851,367 @@ async function saveDraft() {
   }, "Gemini 보완 및 저장이 완료되었습니다.");
 }
 
+
+function downloadSelectedFormat() {
+  const format = document.getElementById("download-format")?.value || "docx";
+  if (format === "pptx") return downloadPptx();
+  if (format === "pdf") return downloadPdf();
+  return downloadDocx();
+}
+
+
+async function downloadPdf() {
+  if (!state.project?.draft) return;
+  await withStatus("PDF 문서를 생성하는 중입니다.", async () => {
+    const JsPdfCtor = resolveJsPdfConstructor();
+    ensureLibrary(JsPdfCtor, "jsPDF");
+    ensureLibrary(window.html2canvas, "html2canvas");
+    const pdf = await buildPdfFromDraft(state.project.draft, JsPdfCtor);
+    const fileName = `${sanitizeFileName(state.project.draft.title || "document-insight")}.pdf`;
+    pdf.save(fileName);
+    state.status = "PDF 다운로드를 시작했습니다.";
+  }, "PDF 다운로드를 시작했습니다.");
+}
+
+function resolveJsPdfConstructor() {
+  return window.jspdf?.jsPDF || window.jsPDF;
+}
+
+async function buildPdfFromDraft(draft, JsPdfCtor) {
+  const pdf = new JsPdfCtor({ unit: "pt", format: "a4", orientation: "portrait", compress: true });
+  const pageW = pdf.internal.pageSize.getWidth();
+  const pageH = pdf.internal.pageSize.getHeight();
+  const margin = 42;
+  const contentW = pageW - margin * 2;
+  const contentH = pageH - margin * 2;
+  let y = margin;
+
+  const host = document.createElement("div");
+  host.className = "pdf-export-host";
+  host.style.cssText = "position:absolute;left:-10000px;top:0;width:760px;background:#fff;color:#172033;font-family:Arial,'Apple SD Gothic Neo','Malgun Gothic',sans-serif;line-height:1.55;z-index:-1;";
+  document.body.appendChild(host);
+
+  try {
+    const titleBlock = createPdfBlockElement({ type: "heading", content: { level: 1, text: draft.title || "문서 초안" } }, true);
+    y = await addElementToPdf(pdf, titleBlock, host, margin, y, contentW, contentH, pageW, pageH);
+
+    const blocks = [...(draft.blocks || [])].sort((a, b) => a.order - b.order);
+    for (const block of blocks) {
+      const element = createPdfBlockElement(block, false);
+      if (!element) continue;
+      y = await addElementToPdf(pdf, element, host, margin, y, contentW, contentH, pageW, pageH);
+    }
+    return pdf;
+  } finally {
+    host.remove();
+  }
+}
+
+function createPdfBlockElement(block, isTitle = false) {
+  const content = block?.content || {};
+  const wrap = document.createElement("section");
+  wrap.className = "pdf-export-block";
+  wrap.style.cssText = "box-sizing:border-box;width:760px;padding:10px 4px 14px 4px;background:#fff;color:#172033;break-inside:avoid;";
+
+  if (block.type === "heading") {
+    const level = Number(content.level || (isTitle ? 1 : 2));
+    const h = document.createElement(level <= 1 ? "h1" : "h2");
+    h.textContent = content.text || "제목";
+    h.style.cssText = level <= 1
+      ? "margin:0 0 14px 0;font-size:28px;font-weight:800;color:#172033;line-height:1.35;"
+      : "margin:10px 0 10px 0;font-size:22px;font-weight:800;color:#172033;line-height:1.35;border-bottom:1px solid #d9e2f2;padding-bottom:6px;";
+    wrap.appendChild(h);
+    return wrap;
+  }
+
+  if (block.type === "paragraph") {
+    const p = document.createElement("p");
+    p.textContent = content.text || "";
+    p.style.cssText = "margin:0 0 8px 0;font-size:13px;white-space:pre-wrap;color:#24304a;";
+    wrap.appendChild(p);
+    return wrap;
+  }
+
+  if (block.type === "diagram") {
+    const h = document.createElement("h3");
+    h.textContent = content.title || "다이어그램";
+    h.style.cssText = "margin:0 0 8px 0;font-size:16px;font-weight:700;";
+    const pre = document.createElement("pre");
+    pre.textContent = content.code || "";
+    pre.style.cssText = "margin:0;padding:12px;background:#f6f8fb;border:1px solid #d7dee8;border-radius:8px;font-size:12px;white-space:pre-wrap;color:#172033;";
+    wrap.appendChild(h); wrap.appendChild(pre);
+    return wrap;
+  }
+
+  if (block.type === "chart") {
+    const h = document.createElement("h3");
+    h.textContent = content.title || "차트";
+    h.style.cssText = "margin:0 0 8px 0;font-size:16px;font-weight:700;";
+    wrap.appendChild(h);
+    const rows = (content.values || []).map(item => [item.label, String(item.value)]);
+    wrap.appendChild(createPdfTable(["항목", "값"], rows));
+    return wrap;
+  }
+
+  if (block.type === "table") {
+    if (content.caption) {
+      const h = document.createElement("h3");
+      h.textContent = content.caption;
+      h.style.cssText = "margin:0 0 8px 0;font-size:16px;font-weight:700;";
+      wrap.appendChild(h);
+    }
+    wrap.appendChild(createPdfTable(content.headers || [], content.rows || []));
+    return wrap;
+  }
+
+  if (block.type === "image") {
+    if (content.caption) {
+      const h = document.createElement("h3");
+      h.textContent = content.caption;
+      h.style.cssText = "margin:0 0 8px 0;font-size:16px;font-weight:700;";
+      wrap.appendChild(h);
+    }
+    if (content.dataUrl) {
+      const img = document.createElement("img");
+      img.src = content.dataUrl;
+      img.alt = content.alt || content.caption || "증거 이미지";
+      img.style.cssText = "display:block;max-width:736px;max-height:520px;object-fit:contain;margin:0 auto 8px auto;border:1px solid #d7dee8;border-radius:8px;";
+      wrap.appendChild(img);
+    }
+    if (content.source || content.filename) {
+      const p = document.createElement("p");
+      p.textContent = `근거: ${content.source || content.filename}`;
+      p.style.cssText = "margin:4px 0 0 0;font-size:10px;color:#65708a;";
+      wrap.appendChild(p);
+    }
+    return wrap;
+  }
+
+  return null;
+}
+
+function createPdfTable(headers, rows) {
+  const table = document.createElement("table");
+  table.style.cssText = "border-collapse:collapse;width:100%;font-size:11px;table-layout:fixed;color:#172033;";
+  const normalizedHeaders = Array.isArray(headers) && headers.length ? headers : ["항목", "내용"];
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  normalizedHeaders.forEach(header => {
+    const th = document.createElement("th");
+    th.textContent = String(header ?? "");
+    th.style.cssText = "border:1px solid #d0d7e2;background:#eef4ff;padding:7px 6px;font-weight:800;text-align:left;vertical-align:top;word-break:break-word;";
+    trh.appendChild(th);
+  });
+  thead.appendChild(trh); table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  (Array.isArray(rows) ? rows : []).forEach(row => {
+    const tr = document.createElement("tr");
+    const cells = Array.isArray(row) ? row : [row];
+    normalizedHeaders.forEach((_, idx) => {
+      const td = document.createElement("td");
+      td.textContent = String(cells[idx] ?? "");
+      td.style.cssText = "border:1px solid #d0d7e2;padding:6px 6px;vertical-align:top;word-break:break-word;white-space:pre-wrap;";
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  return table;
+}
+
+async function addElementToPdf(pdf, element, host, margin, y, contentW, contentH, pageW, pageH) {
+  host.innerHTML = "";
+  host.appendChild(element);
+  await waitForImages(element);
+  const canvas = await window.html2canvas(element, { scale: 2, backgroundColor: "#ffffff", useCORS: true, allowTaint: true, logging: false });
+  if (!canvas.width || !canvas.height) return y;
+  const scaledH = canvas.height * contentW / canvas.width;
+  if (y > margin && y + Math.min(scaledH, contentH) > pageH - margin) {
+    pdf.addPage();
+    y = margin;
+  }
+  if (scaledH <= contentH) {
+    pdf.addImage(canvas.toDataURL("image/png", 0.92), "PNG", margin, y, contentW, scaledH, undefined, "FAST");
+    return y + scaledH + 8;
+  }
+
+  const sliceCanvas = document.createElement("canvas");
+  const sliceCtx = sliceCanvas.getContext("2d");
+  sliceCanvas.width = canvas.width;
+  const availableFirst = pageH - margin - y;
+  let sourceY = 0;
+  let first = true;
+  while (sourceY < canvas.height) {
+    const availablePt = first ? Math.max(120, availableFirst) : contentH;
+    const sliceHpx = Math.min(canvas.height - sourceY, Math.floor(availablePt * canvas.width / contentW));
+    sliceCanvas.height = sliceHpx;
+    sliceCtx.clearRect(0, 0, sliceCanvas.width, sliceCanvas.height);
+    sliceCtx.drawImage(canvas, 0, sourceY, canvas.width, sliceHpx, 0, 0, sliceCanvas.width, sliceHpx);
+    const targetH = sliceHpx * contentW / canvas.width;
+    if (!first) y = margin;
+    pdf.addImage(sliceCanvas.toDataURL("image/png", 0.92), "PNG", margin, y, contentW, targetH, undefined, "FAST");
+    sourceY += sliceHpx;
+    if (sourceY < canvas.height) {
+      pdf.addPage();
+      y = margin;
+    } else {
+      y += targetH + 8;
+    }
+    first = false;
+  }
+  return y;
+}
+
+function waitForImages(element) {
+  const images = Array.from(element.querySelectorAll("img"));
+  return Promise.all(images.map(img => {
+    if (img.complete) return Promise.resolve();
+    return new Promise(resolve => {
+      img.onload = () => resolve();
+      img.onerror = () => resolve();
+    });
+  }));
+}
+
+async function downloadPptx() {
+  if (!state.project?.draft) return;
+  await withStatus("PowerPoint 문서를 생성하는 중입니다.", async () => {
+    const PptxCtor = resolvePptxConstructor();
+    ensureLibrary(PptxCtor, "PptxGenJS");
+    const pptx = buildPptxFromDraft(state.project.draft, PptxCtor);
+    const fileName = `${sanitizeFileName(state.project.draft.title || "document-insight")}.pptx`;
+    await pptx.writeFile({ fileName });
+    state.status = "PowerPoint 다운로드를 시작했습니다.";
+  }, "PowerPoint 다운로드를 시작했습니다.");
+}
+
+function resolvePptxConstructor() {
+  return window.pptxgen || window.pptxgenjs || window.PptxGenJS || window.PptxGen;
+}
+
+function buildPptxFromDraft(draft, PptxCtor) {
+  const pptx = new PptxCtor();
+  pptx.layout = "LAYOUT_WIDE";
+  pptx.author = "Document Insight OS";
+  pptx.company = "Document Insight OS";
+  pptx.subject = "Generated regulatory design document";
+  pptx.title = draft.title || "Document Insight OS";
+  pptx.lang = "ko-KR";
+  pptx.theme = { headFontFace: "Arial", bodyFontFace: "Arial", lang: "ko-KR" };
+  addPptTitleSlide(pptx, draft.title || "문서 초안");
+  const blocks = [...(draft.blocks || [])].sort((a, b) => a.order - b.order);
+  let sectionTitle = draft.title || "문서 초안";
+  for (const block of blocks) {
+    const content = block.content || {};
+    if (block.type === "heading") {
+      sectionTitle = content.text || sectionTitle;
+      addPptSectionSlide(pptx, sectionTitle);
+    } else if (block.type === "paragraph") {
+      for (const chunk of splitTextForSlides(content.text || "", 620)) addPptTextSlide(pptx, sectionTitle, chunk);
+    } else if (block.type === "table") {
+      addPptTableSlides(pptx, content.caption || sectionTitle, content.headers || [], content.rows || []);
+    } else if (block.type === "diagram") {
+      addPptTextSlide(pptx, content.title || sectionTitle, content.code || "");
+    } else if (block.type === "chart") {
+      const rows = (content.values || []).map(item => `${item.label}: ${item.value}`).join("\n");
+      addPptTextSlide(pptx, content.title || sectionTitle, rows);
+    } else if (block.type === "image") {
+      addPptImageSlide(pptx, content.caption || content.alt || sectionTitle, content);
+    }
+  }
+  return pptx;
+}
+
+function addPptTitleSlide(pptx, title) {
+  const slide = pptx.addSlide();
+  slide.background = { color: "FFFFFF" };
+  slide.addText(String(title || "문서 초안"), { x: 0.7, y: 1.9, w: 11.9, h: 0.8, fontFace: "Arial", fontSize: 34, bold: true, color: "172033", fit: "shrink" });
+  slide.addShape(pptx.ShapeType.line, { x: 0.7, y: 2.9, w: 11.9, h: 0, line: { color: "2F6BFF", width: 2 } });
+  slide.addText(`Generated by Document Insight OS\n${new Date().toLocaleString("ko-KR")}`, { x: 0.7, y: 3.25, w: 11.9, h: 0.7, fontFace: "Arial", fontSize: 13, color: "65708A", fit: "shrink" });
+}
+
+function addPptSectionSlide(pptx, title) {
+  const slide = pptx.addSlide();
+  slide.background = { color: "FFFFFF" };
+  slide.addText(String(title || "섹션"), { x: 0.6, y: 0.55, w: 12.0, h: 0.6, fontFace: "Arial", fontSize: 25, bold: true, color: "172033", fit: "shrink" });
+  slide.addShape(pptx.ShapeType.line, { x: 0.6, y: 1.25, w: 12.0, h: 0, line: { color: "D9E2F2", width: 1 } });
+}
+
+function addPptTextSlide(pptx, title, text) {
+  const clean = String(text || "").trim();
+  if (!clean) return;
+  const slide = pptx.addSlide();
+  slide.background = { color: "FFFFFF" };
+  slide.addText(String(title || "내용"), { x: 0.55, y: 0.35, w: 12.2, h: 0.42, fontFace: "Arial", fontSize: 18, bold: true, color: "172033", fit: "shrink" });
+  slide.addText(clean, { x: 0.75, y: 1.0, w: 11.8, h: 5.9, fontFace: "Arial", fontSize: clean.length > 420 ? 11 : 13, color: "24304A", valign: "top", fit: "shrink", breakLine: false, margin: 0.08 });
+}
+
+function addPptTableSlides(pptx, title, headers, rows) {
+  const tableRows = Array.isArray(rows) ? rows : [];
+  const tableHeaders = Array.isArray(headers) && headers.length ? headers : ["항목", "내용"];
+  const chunks = chunkArray(tableRows, 8);
+  if (!chunks.length) chunks.push([]);
+  chunks.forEach((chunk, index) => {
+    const slide = pptx.addSlide();
+    slide.background = { color: "FFFFFF" };
+    slide.addText(`${title || "표"}${chunks.length > 1 ? ` (${index + 1}/${chunks.length})` : ""}`, { x: 0.55, y: 0.35, w: 12.2, h: 0.42, fontFace: "Arial", fontSize: 18, bold: true, color: "172033", fit: "shrink" });
+    const pptRows = [tableHeaders, ...chunk].map((row, rowIndex) => (row || []).map(cell => ({ text: String(cell ?? "").slice(0, 260), options: { fontFace: "Arial", fontSize: rowIndex === 0 ? 9 : 8, bold: rowIndex === 0, color: "172033", fill: rowIndex === 0 ? { color: "EEF4FF" } : { color: "FFFFFF" }, valign: "mid", margin: 0.05 } })));
+    slide.addTable(pptRows, { x: 0.55, y: 0.95, w: 12.2, h: 5.85, border: { type: "solid", color: "D7DEE8", pt: 0.5 }, autoFit: false, margin: 0.04 });
+  });
+}
+
+function addPptImageSlide(pptx, title, content) {
+  const slide = pptx.addSlide();
+  slide.background = { color: "FFFFFF" };
+  slide.addText(String(title || "증거 이미지"), { x: 0.55, y: 0.35, w: 12.2, h: 0.42, fontFace: "Arial", fontSize: 18, bold: true, color: "172033", fit: "shrink" });
+  if (content.dataUrl) {
+    const box = pptImageBox(Number(content.width || content.originalWidth || 1200), Number(content.height || content.originalHeight || 800), 11.4, 5.7);
+    slide.addImage({ data: content.dataUrl, x: 0.95 + box.x, y: 1.0 + box.y, w: box.w, h: box.h });
+  } else {
+    slide.addText("이미지 데이터 없음", { x: 0.8, y: 1.2, w: 11.8, h: 0.5, fontSize: 14, color: "65708A" });
+  }
+  if (content.source || content.filename) {
+    slide.addText(`근거: ${content.source || content.filename}`, { x: 0.75, y: 6.75, w: 11.8, h: 0.3, fontFace: "Arial", fontSize: 8, color: "65708A", fit: "shrink" });
+  }
+}
+
+function splitTextForSlides(text, maxLen = 620) {
+  const clean = String(text || "").replace(/\n{3,}/g, "\n\n").trim();
+  if (!clean) return [];
+  const paragraphs = clean.split(/\n{2,}/).map(item => item.trim()).filter(Boolean);
+  const chunks = [];
+  let current = "";
+  for (const para of paragraphs.length ? paragraphs : [clean]) {
+    if ((current + "\n\n" + para).trim().length > maxLen && current) {
+      chunks.push(current.trim());
+      current = para;
+    } else {
+      current = `${current}\n\n${para}`.trim();
+    }
+    while (current.length > maxLen * 1.5) {
+      chunks.push(current.slice(0, maxLen));
+      current = current.slice(maxLen).trim();
+    }
+  }
+  if (current) chunks.push(current.trim());
+  return chunks;
+}
+
+function chunkArray(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+function pptImageBox(widthPx, heightPx, maxW, maxH) {
+  const wPx = Math.max(1, widthPx || 1200);
+  const hPx = Math.max(1, heightPx || 800);
+  const ratio = Math.min(maxW / wPx, maxH / hPx);
+  const w = wPx * ratio;
+  const h = hPx * ratio;
+  return { w, h, x: (maxW - w) / 2, y: (maxH - h) / 2 };
+}
+
 async function downloadDocx() {
   if (!state.project?.draft) return;
   await withStatus("Word 문서를 생성하는 중입니다.", async () => {
@@ -2934,6 +3302,11 @@ function draftToWordBodyXml(draft, imageRelMap = {}) {
     } else if (block.type === "diagram") {
       parts.push(paragraphXml(block.content.title || "다이어그램", "Heading2"));
       splitParagraphText(block.content.code || "").forEach(line => parts.push(paragraphXml(line, "Normal")));
+    } else if (block.type === "image") {
+      if (block.content.caption) parts.push(paragraphXml(block.content.caption, "Heading2"));
+      const rel = imageRelMap[block.id];
+      if (rel) parts.push(imageXml(rel, block.content));
+      if (block.content.source || block.content.filename) parts.push(paragraphXml(`근거: ${block.content.source || block.content.filename}`, "Normal"));
     }
   }
   return parts.join("\n");

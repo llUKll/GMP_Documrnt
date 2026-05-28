@@ -35,3 +35,8 @@ Gemini API Key는 서버가 아니라 현재 브라우저 localStorage에 저장
 ## AI 모델 선택
 
 브라우저 정적 모드에서 OpenAI GPT 또는 Google Gemini를 선택할 수 있습니다. OpenAI GPT 모드는 Responses API를 사용하며, 사내/상용 배포에서는 API Key 보호를 위해 백엔드 프록시 구성을 권장합니다.
+
+
+## 다운로드 형식
+
+초안 생성 후 Word(.docx), PowerPoint(.pptx), PDF(.pdf) 중 선택해 다운로드할 수 있습니다. PDF는 GitHub Pages 정적 모드에서 브라우저 렌더링 기반으로 생성됩니다.

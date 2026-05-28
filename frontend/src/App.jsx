@@ -243,6 +243,19 @@ function App() {
     }
   }
 
+  async function downloadSelected() {
+    const format = document.getElementById("download-format-react")?.value || "docx";
+    if (format === "pptx") {
+      setStatus("백엔드 모드의 PPT 다운로드는 정적 GitHub Pages 버전에서 지원됩니다. GitHub Pages 화면에서 PowerPoint(.pptx)를 선택해 다운로드하세요.");
+      return;
+    }
+    if (format === "pdf") {
+      setStatus("백엔드 모드의 PDF 다운로드는 정적 GitHub Pages 버전에서 지원됩니다. GitHub Pages 화면에서 PDF 문서(.pdf)를 선택해 다운로드하세요.");
+      return;
+    }
+    return downloadDocx();
+  }
+
   async function downloadDocx() {
     if (!project?.draft) return;
     beginWork("Word 문서를 생성하는 중입니다.");
@@ -315,7 +328,14 @@ function App() {
           </div>
           <input id="files" type="file" multiple accept=".xlsx,.docx,.pdf,.txt,.md,.csv,.zip,.hwpx,.hwp,.png,.jpg,.jpeg,.webp,.kt,.java,.xml,.gradle,.kts,.json,.yml,.yaml" onChange={uploadFiles} disabled={busy} />
           <button onClick={analyze} disabled={!project || project.files.length === 0 || busy}>분석 및 초안 생성</button>
-          <button className="secondary" onClick={downloadDocx} disabled={!project?.draft || busy}>Word 다운로드</button>
+          <div className="download-format-row">
+            <select id="download-format-react" disabled={!project?.draft || busy} defaultValue="docx">
+              <option value="docx">Word 문서(.docx)</option>
+              <option value="pptx">PowerPoint(.pptx)</option>
+              <option value="pdf">PDF 문서(.pdf)</option>
+            </select>
+            <button className="secondary" onClick={downloadSelected} disabled={!project?.draft || busy}>선택 형식 다운로드</button>
+          </div>
         </section>
 
         {project && (
